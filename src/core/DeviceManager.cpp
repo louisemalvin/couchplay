@@ -220,6 +220,18 @@ void DeviceManager::parseDevices()
     static const QRegularExpression joyRegex(QStringLiteral("js(\\d+)"));
     static const QRegularExpression physRegex(QStringLiteral("^P: Phys=(.*)$"));
     static const QRegularExpression idRegex(QStringLiteral("^I: Bus=\\w+ Vendor=(\\w+) Product=(\\w+)"));
+    static const QRegularExpression hidrawNumRegex(QStringLiteral("/dev/hidraw(\\d+)"));
+
+    auto resolveHidraw = [this](InputDevice &device) {
+        device.hidrawPath = findHidrawForEvent(device.eventNumber);
+        if (!device.hidrawPath.isEmpty()) {
+            QRegularExpressionMatch hidrawMatch = hidrawNumRegex.match(device.hidrawPath);
+            if (hidrawMatch.hasMatch()) {
+                device.hidrawNumber = hidrawMatch.captured(1).toInt();
+            }
+            qDebug() << "DeviceManager: Found hidraw" << device.hidrawPath << "for event" << device.eventNumber;
+        }
+    };
 
     while (!stream.atEnd()) {
         QString line = stream.readLine();
@@ -250,6 +262,8 @@ void DeviceManager::parseDevices()
                 device.assignedInstance = -1;
                 device.isVirtual = isVirtualDevice(currentName, currentPhys);
                 device.isInternal = isInternalDevice(currentName);
+
+                resolveHidraw(device);
 
                 if (m_settingsManager && m_settingsManager->ignoredDevices().contains(device.stableId)) {
                     qDebug() << "DeviceManager: Ignoring device" << device.name << "stableId:" << device.stableId;
@@ -328,6 +342,8 @@ void DeviceManager::parseDevices()
         device.assignedInstance = -1;
         device.isVirtual = isVirtualDevice(currentName, currentPhys);
         device.isInternal = isInternalDevice(currentName);
+
+        resolveHidraw(device);
 
         if (m_settingsManager && m_settingsManager->ignoredDevices().contains(device.stableId)) {
             qDebug() << "DeviceManager: Ignoring device" << device.name << "stableId:" << device.stableId;
@@ -520,6 +536,17 @@ QStringList DeviceManager::getDevicePathsForInstance(int instanceIndex) const
         }
     }
     return result;
+}
+
+QStringList DeviceManager::getHidrawPathsForInstance(int instanceIndex) const
+{
+    QStringList paths;
+    for (const auto &device : m_devices) {
+        if (device.assignedInstance == instanceIndex && !device.hidrawPath.isEmpty()) {
+            paths.append(device.hidrawPath);
+        }
+    }
+    return paths;
 }
 
 int DeviceManager::autoAssignControllers()
@@ -951,4 +978,31 @@ void DeviceManager::checkPendingDevices()
         m_pendingDevices = stillPending;
         Q_EMIT pendingDevicesChanged();
     }
+}
+
+QString DeviceManager::findHidrawForEvent(int eventNumber) const
+{
+    QString basePath = QStringLiteral("/sys/class/input/event%1/device").arg(eventNumber);
+
+    static const QStringList hidrawSearchPaths = {
+        QStringLiteral("/device/hidraw"),
+        QStringLiteral("/../hidraw"),
+        QStringLiteral("/hidraw"),
+    };
+    static QRegularExpression hidrawNumRegex(QStringLiteral("hidraw(\\d+)"));
+
+    for (const QString &suffix : hidrawSearchPaths) {
+        QDir dir(basePath + suffix);
+        if (dir.exists()) {
+            QStringList entries = dir.entryList({QStringLiteral("hidraw*")}, QDir::Dirs);
+            if (!entries.isEmpty()) {
+                QRegularExpressionMatch match = hidrawNumRegex.match(entries.first());
+                if (match.hasMatch()) {
+                    return QStringLiteral("/dev/hidraw%1").arg(match.captured(1));
+                }
+            }
+        }
+    }
+
+    return QString();
 }

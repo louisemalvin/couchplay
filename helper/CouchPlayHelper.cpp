@@ -704,14 +704,25 @@ bool CouchPlayHelper::checkAuthorization(const QString &action)
 
 bool CouchPlayHelper::isValidDevicePath(const QString &path)
 {
-    // Must be under /dev/input/
-    if (!path.startsWith(QStringLiteral("/dev/input/"))) {
-        return false;
-    }
-
     // Check for path traversal attempts
     if (path.contains(QStringLiteral(".."))) {
         return false;
+    }
+
+    // Must be under /dev/input/ OR /dev/hidraw*
+    bool isInputDevice = path.startsWith(QStringLiteral("/dev/input/"));
+    bool isHidrawDevice = path.startsWith(QStringLiteral("/dev/hidraw"));
+
+    if (!isInputDevice && !isHidrawDevice) {
+        return false;
+    }
+
+    // Validate hidraw path format strictly
+    if (isHidrawDevice) {
+        static QRegularExpression hidrawRegex(QStringLiteral("^/dev/hidraw\\d+$"));
+        if (!hidrawRegex.match(path).hasMatch()) {
+            return false;
+        }
     }
 
     // Must be a character device

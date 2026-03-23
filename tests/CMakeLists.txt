@@ -46,6 +46,8 @@ set(TEST_MANAGER_SOURCES
     ../src/core/Logging.h
     ../src/core/CommandVerifier.cpp
     ../src/core/CommandVerifier.h
+    ../src/core/VirtualDeviceWatcher.cpp
+    ../src/core/VirtualDeviceWatcher.h
     ../src/dbus/CouchPlayHelperClient.cpp
     ../src/dbus/CouchPlayHelperClient.h
 )

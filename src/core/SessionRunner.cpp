@@ -65,6 +65,10 @@ SessionRunner::SessionRunner(QObject *parent)
     // Set up global shortcut for stopping session
     setupGlobalShortcut();
     
+    m_virtualDeviceWatcher = new VirtualDeviceWatcher(this);
+    connect(m_virtualDeviceWatcher, &VirtualDeviceWatcher::virtualDeviceAppeared,
+            this, &SessionRunner::onVirtualDeviceAppeared);
+    
     // Connect to window positioning signals
     connect(m_windowManager, &WindowManager::gamescopeWindowPositioned,
             this, &SessionRunner::onWindowPositioned);
@@ -313,6 +317,14 @@ bool SessionRunner::start()
     Q_EMIT instancesChanged();
     Q_EMIT sessionStarted();
 
+    QSet<int> knownEventNumbers;
+    if (m_deviceManager) {
+        for (const auto &device : m_deviceManager->devices()) {
+            knownEventNumbers.insert(device.eventNumber);
+        }
+    }
+    m_virtualDeviceWatcher->startWatching(knownEventNumbers);
+
     return true;
 }
 
@@ -323,6 +335,8 @@ void SessionRunner::stop()
     }
 
     setStatus(QStringLiteral("Stopping session..."));
+
+    m_virtualDeviceWatcher->stopWatching();
 
     // Stop all instances
     for (auto *instance : m_instances) {
@@ -459,6 +473,18 @@ bool SessionRunner::setupDeviceOwnership()
             } else {
                 qWarning() << "SessionRunner: Failed to set ownership of" << path;
                 Q_EMIT errorOccurred(QStringLiteral("Failed to set device ownership for %1").arg(path));
+            }
+        }
+        
+        QStringList hidrawPaths = m_deviceManager->getHidrawPathsForInstance(i);
+        for (const QString &hidrawPath : hidrawPaths) {
+            if (m_helperClient->setDeviceOwner(hidrawPath, uid)) {
+                if (!m_ownedDevicePaths.contains(hidrawPath)) {
+                    m_ownedDevicePaths.append(hidrawPath);
+                }
+                qDebug() << "SessionRunner: Set hidraw ownership" << hidrawPath << "for user" << username;
+            } else {
+                qWarning() << "SessionRunner: Failed to set hidraw ownership" << hidrawPath;
             }
         }
     }
@@ -914,15 +940,10 @@ QList<QRect> SessionRunner::calculateLayout(const QString &layout,
             result.append(QRect(x, y + i * instanceHeight, w, instanceHeight));
         }
     } else if (layout == QStringLiteral("grid")) {
-        // 2x2 grid for 4 players, 2x1 for 2, etc.
-        int cols, rows;
-        if (instanceCount <= 2) {
-            cols = 2;
-            rows = 1;
-        } else {
-            cols = 2;
-            rows = 2;
-        }
+        // Grid layout: 2 columns for 3+ players, match count for 1-2
+        // Uses same formula as SessionManager::recalculateOutputResolutions()
+        int cols = (instanceCount <= 2) ? instanceCount : 2;
+        int rows = (instanceCount + cols - 1) / cols;
         
         int cellWidth = w / cols;
         int cellHeight = h / rows;
@@ -1098,5 +1119,153 @@ void SessionRunner::onDeviceReconnected(const QString &stableId, int eventNumber
     } else {
         qWarning() << "SessionRunner: Failed to restore ownership of" << devicePath;
         Q_EMIT errorOccurred(QStringLiteral("Failed to restore device ownership for %1").arg(devicePath));
+    }
+    
+    QString hidrawPath = m_deviceManager->findHidrawForEvent(eventNumber);
+    if (!hidrawPath.isEmpty() && m_helperClient->setDeviceOwner(hidrawPath, uid)) {
+        if (!m_ownedDevicePaths.contains(hidrawPath)) {
+            m_ownedDevicePaths.append(hidrawPath);
+        }
+        qDebug() << "SessionRunner: Restored hidraw ownership on reconnection:" << hidrawPath;
+    }
+}
+
+QList<qint64> SessionRunner::getGamescopePids() const
+{
+    QList<qint64> pids;
+    for (const auto *instance : m_instances) {
+        if (instance && instance->gamescopePid() > 0) {
+            pids.append(instance->gamescopePid());
+        }
+    }
+    return pids;
+}
+
+qint64 SessionRunner::findSteamProcess(qint64 gamescopePid, int maxDepth) const
+{
+    if (maxDepth <= 0 || gamescopePid <= 0) {
+        return 0;
+    }
+
+    QString childrenPath = QStringLiteral("/proc/%1/task/%1/children").arg(gamescopePid);
+    QFile childrenFile(childrenPath);
+    if (!childrenFile.open(QIODevice::ReadOnly)) {
+        return 0;
+    }
+
+    QString childrenData = QString::fromLocal8Bit(childrenFile.readAll());
+    QStringList childPids = childrenData.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+
+    for (const QString &childPidStr : childPids) {
+        qint64 childPid = childPidStr.toLongLong();
+        if (childPid <= 0) {
+            continue;
+        }
+
+        QString commPath = QStringLiteral("/proc/%1/comm").arg(childPid);
+        QFile commFile(commPath);
+        if (commFile.open(QIODevice::ReadOnly)) {
+            QString comm = QString::fromLocal8Bit(commFile.readAll()).trimmed().toLower();
+            if (comm.contains(QStringLiteral("steam"))) {
+                return childPid;
+            }
+        }
+
+        qint64 grandchildSteam = findSteamProcess(childPid, maxDepth - 1);
+        if (grandchildSteam > 0) {
+            return grandchildSteam;
+        }
+    }
+
+    return 0;
+}
+
+// DEVIATION: Synchronous /proc/<pid>/fd/ traversal (see AGENTS.md anti-patterns).
+// Steam has bounded FDs and VirtualDeviceWatcher debounces, so impact is minimal.
+// TODO: Move to QThread if latency becomes measurable.
+bool SessionRunner::hasUinputOpen(qint64 pid) const
+{
+    QString fdDir = QStringLiteral("/proc/%1/fd").arg(pid);
+    QDir dir(fdDir);
+
+    for (const QString &fdLink : dir.entryList(QDir::Files)) {
+        QString linkTarget = QFile::symLinkTarget(fdDir + QStringLiteral("/") + fdLink);
+        if (linkTarget == QStringLiteral("/dev/uinput")) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool SessionRunner::hasFdOpen(qint64 pid, const QString &targetPath) const
+{
+    QString fdDir = QStringLiteral("/proc/%1/fd").arg(pid);
+    QDir dir(fdDir);
+
+    for (const QString &fdLink : dir.entryList(QDir::Files)) {
+        if (QFile::symLinkTarget(fdDir + QStringLiteral("/") + fdLink) == targetPath) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+QString SessionRunner::attributeVirtualDevice(int, const QString &devicePath) const
+{
+    QList<qint64> gamescopePids = getGamescopePids();
+
+    for (qint64 gamescopePid : gamescopePids) {
+        qint64 steamPid = findSteamProcess(gamescopePid);
+        if (steamPid == 0) {
+            continue;
+        }
+
+        if (hasUinputOpen(steamPid) && hasFdOpen(steamPid, devicePath)) {
+            for (int i = 0; i < m_instances.size(); ++i) {
+                if (m_instances[i]->gamescopePid() == gamescopePid) {
+                    if (m_sessionManager) {
+                        const auto &profile = m_sessionManager->currentProfile();
+                        if (i < profile.instances.size()) {
+                            return profile.instances[i].username;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return QString();
+}
+
+void SessionRunner::onVirtualDeviceAppeared(int eventNumber, const QString &devicePath, const QString &deviceName)
+{
+    qDebug() << "SessionRunner: Virtual device appeared:" << devicePath << deviceName;
+
+    if (!m_helperClient || !m_helperClient->isAvailable()) {
+        qWarning() << "SessionRunner: Helper not available, cannot set virtual device ownership";
+        return;
+    }
+
+    QString username = attributeVirtualDevice(eventNumber, devicePath);
+    if (username.isEmpty()) {
+        qWarning() << "SessionRunner: Could not attribute virtual device" << deviceName << devicePath << "- no Steam process with matching FD found";
+        return;
+    }
+
+    struct passwd *pw = getpwnam(username.toLocal8Bit().constData());
+    if (!pw) {
+        qWarning() << "SessionRunner: User" << username << "not found";
+        return;
+    }
+
+    if (m_helperClient->setDeviceOwner(devicePath, pw->pw_uid)) {
+        if (!m_ownedDevicePaths.contains(devicePath)) {
+            m_ownedDevicePaths.append(devicePath);
+        }
+        qDebug() << "SessionRunner: Set virtual device ownership" << devicePath << "for user" << username;
+    } else {
+        qWarning() << "SessionRunner: Failed to set virtual device ownership" << devicePath;
     }
 }

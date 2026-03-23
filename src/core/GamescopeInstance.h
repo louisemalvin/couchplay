@@ -32,6 +32,7 @@ class GamescopeInstance : public QObject
     Q_PROPERTY(bool running READ isRunning NOTIFY runningChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(qint64 pid READ pid NOTIFY runningChanged)
+    Q_PROPERTY(qint64 gamescopePid READ gamescopePid NOTIFY gamescopePidChanged)
     Q_PROPERTY(QString username READ username NOTIFY configChanged)
     Q_PROPERTY(QRect windowGeometry READ windowGeometry NOTIFY configChanged)
 
@@ -79,6 +80,11 @@ public:
     // Property getters
     int index() const { return m_index; }
     qint64 pid() const { return m_helperPid > 0 ? m_helperPid : (m_process ? m_process->processId() : 0); }
+    /**
+     * @brief Get the PID of the gamescope process
+     * @return PID, or 0 if not running
+     */
+    qint64 gamescopePid() const { return m_gamescopePid; }
     QString status() const { return m_status; }
     QString username() const { return m_username; }
     QRect windowGeometry() const { return m_windowGeometry; }
@@ -101,6 +107,7 @@ Q_SIGNALS:
     void runningChanged();
     void statusChanged();
     void configChanged();
+    void gamescopePidChanged();
     void started();
     void stopped();
     void errorOccurred(const QString &message);
@@ -115,6 +122,7 @@ private Q_SLOTS:
 
 private:
     void setStatus(const QString &status);
+    static qint64 resolveGamescopePid(qint64 launchedPid);
 
     QProcess *m_process = nullptr;
     int m_index = -1;
@@ -122,4 +130,5 @@ private:
     QString m_username;
     QRect m_windowGeometry;
     qint64 m_helperPid = 0;        // PID from helper service
+    qint64 m_gamescopePid = 0;
 };

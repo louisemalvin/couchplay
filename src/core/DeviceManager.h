@@ -34,6 +34,8 @@ struct InputDevice {
     Q_PROPERTY(bool isVirtual MEMBER isVirtual)
     Q_PROPERTY(bool isInternal MEMBER isInternal)
     Q_PROPERTY(QString stableId MEMBER stableId)
+    Q_PROPERTY(QString hidrawPath MEMBER hidrawPath)
+    Q_PROPERTY(int hidrawNumber MEMBER hidrawNumber)
 
 public:
     int eventNumber = -1;
@@ -49,6 +51,8 @@ public:
     int assignedInstance = -1;
     bool isVirtual = false;  // Virtual/software device
     bool isInternal = false; // Internal device (power buttons, etc.)
+    QString hidrawPath; // /dev/hidrawN (correlated via sysfs)
+    int hidrawNumber = -1; // Just the N for quick access (-1 if no hidraw)
 };
 
 Q_DECLARE_METATYPE(InputDevice)
@@ -128,6 +132,18 @@ public:
      * @return List of device paths
      */
     Q_INVOKABLE QStringList getDevicePathsForInstance(int instanceIndex) const;
+
+    /**
+     * @brief Get hidraw paths for devices assigned to an instance
+     * @param instanceIndex The instance index
+     * @return List of hidraw paths (only devices that have hidraw)
+     */
+    Q_INVOKABLE QStringList getHidrawPathsForInstance(int instanceIndex) const;
+
+    /**
+     * @brief Find hidraw device path for an input event device via sysfs
+     */
+    QString findHidrawForEvent(int eventNumber) const;
 
     /**
      * @brief Auto-assign controllers to instances (one per instance)
