@@ -233,6 +233,13 @@ bool HeroicConfigManager::syncShortcutsToUser(const QString &targetUsername)
     QString targetHome = QString::fromLocal8Bit(pw->pw_dir);
     QString targetDir = targetHome + QStringLiteral("/.local/share/applications");
 
+    if (!targetDir.startsWith(targetHome + QLatin1Char('/'))) {
+        qWarning() << "HeroicConfigManager: Target directory" << targetDir
+                   << "is not under user's home" << targetHome;
+        Q_EMIT syncFailed(targetUsername, QStringLiteral("Target path is not under user's home directory"));
+        return false;
+    }
+
     if (!m_helperClient->createUserDirectory(targetDir, targetUsername)) {
         qWarning() << "HeroicConfigManager: Failed to create target directory:" << targetDir;
         Q_EMIT syncFailed(targetUsername, QStringLiteral("Failed to create target directory"));
@@ -287,6 +294,13 @@ bool HeroicConfigManager::syncConfigToUser(const QString &targetUsername)
         targetHeroicRoot = targetHome + QStringLiteral("/.var/app/com.heroicgameslauncher.hgl/config/heroic");
     } else {
         targetHeroicRoot = targetHome + QStringLiteral("/.config/heroic");
+    }
+
+    if (!targetHeroicRoot.startsWith(targetHome + QLatin1Char('/'))) {
+        qWarning() << "HeroicConfigManager: Target heroic root" << targetHeroicRoot
+                   << "is not under user's home" << targetHome;
+        Q_EMIT syncFailed(targetUsername, QStringLiteral("Target path is not under user's home directory"));
+        return false;
     }
 
     auto copyFile = [this, &targetUsername, &targetHeroicRoot](const QString &sourcePath, const QString &relTargetPath) {

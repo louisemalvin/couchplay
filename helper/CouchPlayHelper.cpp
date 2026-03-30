@@ -1220,6 +1220,27 @@ bool CouchPlayHelper::CopyFileToUser(const QString &sourcePath, const QString &t
     int lastSlash = targetPath.lastIndexOf(QLatin1Char('/'));
     QString targetDir = (lastSlash >= 0) ? targetPath.left(lastSlash) : QStringLiteral(".");
 
+    // Safety: ensure target is under the user's home directory
+    QString userHome = getUserHome(username);
+    if (!targetDir.startsWith(userHome + QLatin1Char('/'))) {
+        qWarning() << "CopyFileToUser: Target path" << targetDir
+                   << "is not under user's home" << userHome;
+        sendErrorReply(QDBusError::InvalidArgs,
+            QStringLiteral("Target path is not under user's home directory"));
+        return false;
+    }
+
+    // Record which directories don't exist yet so we only chown what we create
+    QStringList pathParts = targetDir.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    QStringList dirsToChown;
+    QString checkPath = userHome;
+    for (const QString &part : pathParts) {
+        checkPath += QStringLiteral("/") + part;
+        if (!m_ops->fileExists(checkPath)) {
+            dirsToChown.append(checkPath);
+        }
+    }
+
     if (!m_ops->mkpath(targetDir)) {
         qWarning() << "CopyFileToUser: Failed to create directory:" << targetDir;
         sendErrorReply(QDBusError::Failed,
@@ -1227,17 +1248,8 @@ bool CouchPlayHelper::CopyFileToUser(const QString &sourcePath, const QString &t
         return false;
     }
 
-    // Set ownership on created directories
-    // Walk up from target directory, setting ownership on each new directory
-    QString userHome = getUserHome(username);
-    QStringList pathParts = targetDir.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    QString currentPath = userHome;
-    for (const QString &part : pathParts) {
-        currentPath += QStringLiteral("/") + part;
-        // Only chown if it exists (mkpath created it)
-        if (m_ops->fileExists(currentPath)) {
-            m_ops->chown(currentPath, userUid, pw->pw_gid);
-        }
+    for (const QString &dir : dirsToChown) {
+        m_ops->chown(dir, userUid, pw->pw_gid);
     }
 
     // Copy the file
@@ -1305,6 +1317,27 @@ bool CouchPlayHelper::WriteFileToUser(const QByteArray &content, const QString &
     int lastSlash = targetPath.lastIndexOf(QLatin1Char('/'));
     QString targetDir = (lastSlash >= 0) ? targetPath.left(lastSlash) : QStringLiteral(".");
 
+    // Safety: ensure target is under the user's home directory
+    QString userHome = getUserHome(username);
+    if (!targetDir.startsWith(userHome + QLatin1Char('/'))) {
+        qWarning() << "WriteFileToUser: Target path" << targetDir
+                   << "is not under user's home" << userHome;
+        sendErrorReply(QDBusError::InvalidArgs,
+            QStringLiteral("Target path is not under user's home directory"));
+        return false;
+    }
+
+    // Record which directories don't exist yet so we only chown what we create
+    QStringList pathParts = targetDir.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    QStringList dirsToChown;
+    QString checkPath = userHome;
+    for (const QString &part : pathParts) {
+        checkPath += QStringLiteral("/") + part;
+        if (!m_ops->fileExists(checkPath)) {
+            dirsToChown.append(checkPath);
+        }
+    }
+
     if (!m_ops->mkpath(targetDir)) {
         qWarning() << "WriteFileToUser: Failed to create directory:" << targetDir;
         sendErrorReply(QDBusError::Failed,
@@ -1312,15 +1345,8 @@ bool CouchPlayHelper::WriteFileToUser(const QByteArray &content, const QString &
         return false;
     }
 
-    // Set ownership on created directories
-    QString userHome = getUserHome(username);
-    QStringList pathParts = targetDir.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    QString currentPath = userHome;
-    for (const QString &part : pathParts) {
-        currentPath += QStringLiteral("/") + part;
-        if (m_ops->fileExists(currentPath)) {
-            m_ops->chown(currentPath, userUid, pw->pw_gid);
-        }
+    for (const QString &dir : dirsToChown) {
+        m_ops->chown(dir, userUid, pw->pw_gid);
     }
 
     // Write the file
@@ -1377,6 +1403,27 @@ bool CouchPlayHelper::CreateUserDirectory(const QString &path, const QString &us
         return false;
     }
 
+    // Safety: ensure path is under the user's home directory
+    QString userHome = getUserHome(username);
+    if (!path.startsWith(userHome + QLatin1Char('/'))) {
+        qWarning() << "CreateUserDirectory: Path" << path
+                   << "is not under user's home" << userHome;
+        sendErrorReply(QDBusError::InvalidArgs,
+            QStringLiteral("Path is not under user's home directory"));
+        return false;
+    }
+
+    // Record which directories don't exist yet so we only chown what we create
+    QStringList pathParts = path.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    QStringList dirsToChown;
+    QString checkPath = userHome;
+    for (const QString &part : pathParts) {
+        checkPath += QStringLiteral("/") + part;
+        if (!m_ops->fileExists(checkPath)) {
+            dirsToChown.append(checkPath);
+        }
+    }
+
     // Create directories
     if (!m_ops->mkpath(path)) {
         sendErrorReply(QDBusError::Failed,
@@ -1384,15 +1431,8 @@ bool CouchPlayHelper::CreateUserDirectory(const QString &path, const QString &us
         return false;
     }
 
-    // Set ownership on the directory and all parent directories under user's home
-    QString userHome = getUserHome(username);
-    QStringList pathParts = path.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    QString currentPath = userHome;
-    for (const QString &part : pathParts) {
-        currentPath += QStringLiteral("/") + part;
-        if (m_ops->fileExists(currentPath)) {
-            m_ops->chown(currentPath, userUid, pw->pw_gid);
-        }
+    for (const QString &dir : dirsToChown) {
+        m_ops->chown(dir, userUid, pw->pw_gid);
     }
 
     return true;
