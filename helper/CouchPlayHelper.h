@@ -375,6 +375,8 @@ private:
                                   const QStringList &environment);
     QString computeMountTarget(const QString &source, const QString &alias,
                                const QString &userHome, const QString &compositorHome);
+    bool validateUserPath(const QString &path, const QString &username,
+                          const QString &callerName, QStringList &dirsToChown);
 
     QStringList m_modifiedDevices;
     QMap<qint64, QProcess *> m_launchedProcesses;  // PID -> QProcess

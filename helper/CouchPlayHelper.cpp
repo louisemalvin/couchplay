@@ -358,6 +358,32 @@ QString CouchPlayHelper::getUserHomeByUid(uint uid)
     return pw ? QString::fromLocal8Bit(pw->pw_dir) : QString();
 }
 
+bool CouchPlayHelper::validateUserPath(const QString &path, const QString &username,
+                                         const QString &callerName, QStringList &dirsToChown)
+{
+    dirsToChown.clear();
+
+    QString userHome = getUserHome(username);
+    if (!path.startsWith(userHome + QLatin1Char('/'))) {
+        qWarning() << callerName << ": Path" << path
+                   << "is not under user's home" << userHome;
+        sendErrorReply(QDBusError::InvalidArgs,
+            QStringLiteral("Path is not under user's home directory"));
+        return false;
+    }
+
+    QStringList pathParts = path.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    QString checkPath = userHome;
+    for (const QString &part : pathParts) {
+        checkPath += QStringLiteral("/") + part;
+        if (!m_ops->fileExists(checkPath)) {
+            dirsToChown.append(checkPath);
+        }
+    }
+
+    return true;
+}
+
 bool CouchPlayHelper::IsInCouchPlayGroup(const QString &username)
 {
     // Get the couchplay group
@@ -1220,25 +1246,9 @@ bool CouchPlayHelper::CopyFileToUser(const QString &sourcePath, const QString &t
     int lastSlash = targetPath.lastIndexOf(QLatin1Char('/'));
     QString targetDir = (lastSlash >= 0) ? targetPath.left(lastSlash) : QStringLiteral(".");
 
-    // Safety: ensure target is under the user's home directory
-    QString userHome = getUserHome(username);
-    if (!targetDir.startsWith(userHome + QLatin1Char('/'))) {
-        qWarning() << "CopyFileToUser: Target path" << targetDir
-                   << "is not under user's home" << userHome;
-        sendErrorReply(QDBusError::InvalidArgs,
-            QStringLiteral("Target path is not under user's home directory"));
-        return false;
-    }
-
-    // Record which directories don't exist yet so we only chown what we create
-    QStringList pathParts = targetDir.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
     QStringList dirsToChown;
-    QString checkPath = userHome;
-    for (const QString &part : pathParts) {
-        checkPath += QStringLiteral("/") + part;
-        if (!m_ops->fileExists(checkPath)) {
-            dirsToChown.append(checkPath);
-        }
+    if (!validateUserPath(targetDir, username, QStringLiteral("CopyFileToUser"), dirsToChown)) {
+        return false;
     }
 
     if (!m_ops->mkpath(targetDir)) {
@@ -1317,25 +1327,9 @@ bool CouchPlayHelper::WriteFileToUser(const QByteArray &content, const QString &
     int lastSlash = targetPath.lastIndexOf(QLatin1Char('/'));
     QString targetDir = (lastSlash >= 0) ? targetPath.left(lastSlash) : QStringLiteral(".");
 
-    // Safety: ensure target is under the user's home directory
-    QString userHome = getUserHome(username);
-    if (!targetDir.startsWith(userHome + QLatin1Char('/'))) {
-        qWarning() << "WriteFileToUser: Target path" << targetDir
-                   << "is not under user's home" << userHome;
-        sendErrorReply(QDBusError::InvalidArgs,
-            QStringLiteral("Target path is not under user's home directory"));
-        return false;
-    }
-
-    // Record which directories don't exist yet so we only chown what we create
-    QStringList pathParts = targetDir.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
     QStringList dirsToChown;
-    QString checkPath = userHome;
-    for (const QString &part : pathParts) {
-        checkPath += QStringLiteral("/") + part;
-        if (!m_ops->fileExists(checkPath)) {
-            dirsToChown.append(checkPath);
-        }
+    if (!validateUserPath(targetDir, username, QStringLiteral("WriteFileToUser"), dirsToChown)) {
+        return false;
     }
 
     if (!m_ops->mkpath(targetDir)) {
@@ -1403,25 +1397,9 @@ bool CouchPlayHelper::CreateUserDirectory(const QString &path, const QString &us
         return false;
     }
 
-    // Safety: ensure path is under the user's home directory
-    QString userHome = getUserHome(username);
-    if (!path.startsWith(userHome + QLatin1Char('/'))) {
-        qWarning() << "CreateUserDirectory: Path" << path
-                   << "is not under user's home" << userHome;
-        sendErrorReply(QDBusError::InvalidArgs,
-            QStringLiteral("Path is not under user's home directory"));
-        return false;
-    }
-
-    // Record which directories don't exist yet so we only chown what we create
-    QStringList pathParts = path.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
     QStringList dirsToChown;
-    QString checkPath = userHome;
-    for (const QString &part : pathParts) {
-        checkPath += QStringLiteral("/") + part;
-        if (!m_ops->fileExists(checkPath)) {
-            dirsToChown.append(checkPath);
-        }
+    if (!validateUserPath(path, username, QStringLiteral("CreateUserDirectory"), dirsToChown)) {
+        return false;
     }
 
     // Create directories
