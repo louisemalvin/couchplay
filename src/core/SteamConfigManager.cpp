@@ -344,7 +344,15 @@ bool SteamConfigManager::syncShortcutsToUser(const QString &targetUsername)
     
     QString targetConfigDir = targetSteamRoot + QStringLiteral("/userdata/") + targetSteamId + QStringLiteral("/config");
     QString targetVdf = targetConfigDir + QStringLiteral("/shortcuts.vdf");
-    
+
+    // Safety: ensure target path is under the user's home directory
+    if (!targetVdf.startsWith(targetHome + QLatin1Char('/'))) {
+        qCWarning(couchplaySteam) << "syncShortcutsToUser: Target path" << targetVdf
+                                  << "is not under user's home" << targetHome;
+        Q_EMIT syncFailed(targetUsername, QStringLiteral("Target path is not under user's home directory"));
+        return false;
+    }
+
     // Direct byte copy - preserves exact Steam format including all end markers
     // This is the preferred approach as it avoids any serialization differences
     QFile sourceFileHandle(sourceFile);

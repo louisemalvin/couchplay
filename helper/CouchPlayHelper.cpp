@@ -358,6 +358,32 @@ QString CouchPlayHelper::getUserHomeByUid(uint uid)
     return pw ? QString::fromLocal8Bit(pw->pw_dir) : QString();
 }
 
+bool CouchPlayHelper::validateUserPath(const QString &path, const QString &username,
+                                         const QString &callerName, QStringList &dirsToChown)
+{
+    dirsToChown.clear();
+
+    QString userHome = getUserHome(username);
+    if (!path.startsWith(userHome + QLatin1Char('/'))) {
+        qWarning() << callerName << ": Path" << path
+                   << "is not under user's home" << userHome;
+        sendErrorReply(QDBusError::InvalidArgs,
+            QStringLiteral("Path is not under user's home directory"));
+        return false;
+    }
+
+    QStringList pathParts = path.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    QString checkPath = userHome;
+    for (const QString &part : pathParts) {
+        checkPath += QStringLiteral("/") + part;
+        if (!m_ops->fileExists(checkPath)) {
+            dirsToChown.append(checkPath);
+        }
+    }
+
+    return true;
+}
+
 bool CouchPlayHelper::IsInCouchPlayGroup(const QString &username)
 {
     // Get the couchplay group
@@ -704,14 +730,25 @@ bool CouchPlayHelper::checkAuthorization(const QString &action)
 
 bool CouchPlayHelper::isValidDevicePath(const QString &path)
 {
-    // Must be under /dev/input/
-    if (!path.startsWith(QStringLiteral("/dev/input/"))) {
-        return false;
-    }
-
     // Check for path traversal attempts
     if (path.contains(QStringLiteral(".."))) {
         return false;
+    }
+
+    // Must be under /dev/input/ OR /dev/hidraw*
+    bool isInputDevice = path.startsWith(QStringLiteral("/dev/input/"));
+    bool isHidrawDevice = path.startsWith(QStringLiteral("/dev/hidraw"));
+
+    if (!isInputDevice && !isHidrawDevice) {
+        return false;
+    }
+
+    // Validate hidraw path format strictly
+    if (isHidrawDevice) {
+        static QRegularExpression hidrawRegex(QStringLiteral("^/dev/hidraw\\d+$"));
+        if (!hidrawRegex.match(path).hasMatch()) {
+            return false;
+        }
     }
 
     // Must be a character device
@@ -1209,6 +1246,11 @@ bool CouchPlayHelper::CopyFileToUser(const QString &sourcePath, const QString &t
     int lastSlash = targetPath.lastIndexOf(QLatin1Char('/'));
     QString targetDir = (lastSlash >= 0) ? targetPath.left(lastSlash) : QStringLiteral(".");
 
+    QStringList dirsToChown;
+    if (!validateUserPath(targetDir, username, QStringLiteral("CopyFileToUser"), dirsToChown)) {
+        return false;
+    }
+
     if (!m_ops->mkpath(targetDir)) {
         qWarning() << "CopyFileToUser: Failed to create directory:" << targetDir;
         sendErrorReply(QDBusError::Failed,
@@ -1216,17 +1258,8 @@ bool CouchPlayHelper::CopyFileToUser(const QString &sourcePath, const QString &t
         return false;
     }
 
-    // Set ownership on created directories
-    // Walk up from target directory, setting ownership on each new directory
-    QString userHome = getUserHome(username);
-    QStringList pathParts = targetDir.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    QString currentPath = userHome;
-    for (const QString &part : pathParts) {
-        currentPath += QStringLiteral("/") + part;
-        // Only chown if it exists (mkpath created it)
-        if (m_ops->fileExists(currentPath)) {
-            m_ops->chown(currentPath, userUid, pw->pw_gid);
-        }
+    for (const QString &dir : dirsToChown) {
+        m_ops->chown(dir, userUid, pw->pw_gid);
     }
 
     // Copy the file
@@ -1294,6 +1327,11 @@ bool CouchPlayHelper::WriteFileToUser(const QByteArray &content, const QString &
     int lastSlash = targetPath.lastIndexOf(QLatin1Char('/'));
     QString targetDir = (lastSlash >= 0) ? targetPath.left(lastSlash) : QStringLiteral(".");
 
+    QStringList dirsToChown;
+    if (!validateUserPath(targetDir, username, QStringLiteral("WriteFileToUser"), dirsToChown)) {
+        return false;
+    }
+
     if (!m_ops->mkpath(targetDir)) {
         qWarning() << "WriteFileToUser: Failed to create directory:" << targetDir;
         sendErrorReply(QDBusError::Failed,
@@ -1301,15 +1339,8 @@ bool CouchPlayHelper::WriteFileToUser(const QByteArray &content, const QString &
         return false;
     }
 
-    // Set ownership on created directories
-    QString userHome = getUserHome(username);
-    QStringList pathParts = targetDir.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    QString currentPath = userHome;
-    for (const QString &part : pathParts) {
-        currentPath += QStringLiteral("/") + part;
-        if (m_ops->fileExists(currentPath)) {
-            m_ops->chown(currentPath, userUid, pw->pw_gid);
-        }
+    for (const QString &dir : dirsToChown) {
+        m_ops->chown(dir, userUid, pw->pw_gid);
     }
 
     // Write the file
@@ -1366,6 +1397,11 @@ bool CouchPlayHelper::CreateUserDirectory(const QString &path, const QString &us
         return false;
     }
 
+    QStringList dirsToChown;
+    if (!validateUserPath(path, username, QStringLiteral("CreateUserDirectory"), dirsToChown)) {
+        return false;
+    }
+
     // Create directories
     if (!m_ops->mkpath(path)) {
         sendErrorReply(QDBusError::Failed,
@@ -1373,15 +1409,8 @@ bool CouchPlayHelper::CreateUserDirectory(const QString &path, const QString &us
         return false;
     }
 
-    // Set ownership on the directory and all parent directories under user's home
-    QString userHome = getUserHome(username);
-    QStringList pathParts = path.mid(userHome.length()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    QString currentPath = userHome;
-    for (const QString &part : pathParts) {
-        currentPath += QStringLiteral("/") + part;
-        if (m_ops->fileExists(currentPath)) {
-            m_ops->chown(currentPath, userUid, pw->pw_gid);
-        }
+    for (const QString &dir : dirsToChown) {
+        m_ops->chown(dir, userUid, pw->pw_gid);
     }
 
     return true;
