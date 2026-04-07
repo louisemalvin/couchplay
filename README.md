@@ -1,6 +1,20 @@
-# CouchPlay
+<p align="center">
+  <img src="assets/icon.png" alt="CouchPlay" width="128"/>
+</p>
 
-Split-screen gaming manager for Linux, designed for KDE Plasma and Gamescope. CouchPlay enables multi-seat gaming sessions on a single PC by managing input device assignment, multiple Gamescope instances, and audio routing.
+<h1 align="center">CouchPlay</h1>
+
+<p align="center">Split-screen gaming manager for Linux, designed for KDE Plasma and Gamescope. CouchPlay enables multi-seat gaming sessions on a single PC by managing input device assignment, multiple Gamescope instances, and audio routing.</p>
+
+## Screenshots
+
+<p align="center">
+  <img src="assets/couchplay-main-cropped.png" alt="CouchPlay Home" width="80%"/>
+</p>
+
+<p align="center">
+  <img src="assets/couchplay-session-cropped.png" alt="CouchPlay Session Configuration" width="80%"/>
+</p>
 
 ## Features
 
