@@ -16,6 +16,34 @@
   <img src="assets/couchplay-session-cropped.png" alt="CouchPlay Session Configuration" width="80%"/>
 </p>
 
+<p align="center">
+  <img src="assets/couchplay-split-screen.png" alt="CouchPlay Split-Screen Gaming" width="80%"/>
+</p>
+
+## Usage
+
+### Creating a Session
+
+1. Open the **New Session** page from the sidebar.
+2. Choose a screen layout that fits your setup:
+   - **Side by Side** — splits the screen horizontally
+   - **Top and Bottom** — splits the screen vertically
+   - **Multi-Monitor** — dedicates one display per player
+3. Configure each player instance: pick a launcher (Steam, Steam Big Picture, or Heroic), then set resolution, refresh rate, and scaling options.
+4. Click **Start Session** to launch all instances through Gamescope.
+
+### Assigning Controllers
+
+Connect your gamepads, then use the **Auto-Assign Controllers** button to let CouchPlay distribute them across player instances. You can also drag and drop devices for manual assignment. Each controller gets locked to its assigned instance so inputs don't leak between players.
+
+### Profiles
+
+Save a session configuration as a profile to reload it later without reconfiguring everything. Profiles are stored as JSON files in `~/.local/share/couchplay/profiles/` and can be loaded from the session page.
+
+### Managing Users
+
+CouchPlay creates temporary Linux user accounts so each player gets isolated save data and settings. Open the **Users** page to view and manage these accounts. The helper service handles the privileged operations behind the scenes.
+
 ## Features
 
 - 🎮 **Input Isolation**: Assign specific gamepads/keyboards to specific player instances.
