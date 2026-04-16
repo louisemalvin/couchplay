@@ -21,9 +21,9 @@ Kirigami.ScrollablePage {
     required property var userManager
     required property var presetManager
 
-    // Sync with session manager
     property int instanceCount: sessionManager ? sessionManager.instanceCount : 2
     property string layoutMode: sessionManager ? sessionManager.currentLayout : "horizontal"
+    property string gridSubLayout: sessionManager ? sessionManager.currentGridSubLayout : ""
 
     // Revision counter to force re-evaluation of user filtering when instances change
     property int instancesRevision: 0
@@ -60,7 +60,6 @@ Kirigami.ScrollablePage {
         return [{ username: "" }].concat(filtered)
     }
 
-    // Helper function to get primary monitor size
     function getPrimaryMonitorSize() {
         if (!monitorManager) return { width: 1920, height: 1080 }
         let monitors = monitorManager.monitors
@@ -69,7 +68,6 @@ Kirigami.ScrollablePage {
                 return { width: monitors[i].width, height: monitors[i].height }
             }
         }
-        // Fallback to first monitor or default
         if (monitors.length > 0) {
             return { width: monitors[0].width, height: monitors[0].height }
         }
@@ -79,7 +77,14 @@ Kirigami.ScrollablePage {
     onLayoutModeChanged: {
         if (sessionManager) {
             sessionManager.currentLayout = layoutMode
-            // Recalculate output resolutions based on screen size
+            let screenSize = getPrimaryMonitorSize()
+            sessionManager.recalculateOutputResolutions(screenSize.width, screenSize.height)
+        }
+    }
+
+    onGridSubLayoutChanged: {
+        if (sessionManager && sessionManager.currentLayout === "grid") {
+            sessionManager.currentGridSubLayout = gridSubLayout
             let screenSize = getPrimaryMonitorSize()
             sessionManager.recalculateOutputResolutions(screenSize.width, screenSize.height)
         }
@@ -88,7 +93,6 @@ Kirigami.ScrollablePage {
     onInstanceCountChanged: {
         if (sessionManager && sessionManager.instanceCount !== instanceCount) {
             sessionManager.instanceCount = instanceCount
-            // Recalculate output resolutions when instance count changes
             let screenSize = getPrimaryMonitorSize()
             sessionManager.recalculateOutputResolutions(screenSize.width, screenSize.height)
         }
@@ -122,7 +126,6 @@ Kirigami.ScrollablePage {
         }
     ]
 
-    // Save profile dialog
     Kirigami.PromptDialog {
         id: saveProfileDialog
         title: i18nc("@title:dialog", "Save Profile")
@@ -155,7 +158,6 @@ Kirigami.ScrollablePage {
     ColumnLayout {
         spacing: Kirigami.Units.largeSpacing
 
-        // Running session status
         Kirigami.InlineMessage {
             Layout.fillWidth: true
             visible: sessionRunner?.running ?? false
@@ -172,7 +174,6 @@ Kirigami.ScrollablePage {
             ]
         }
 
-        // Layout Selection
         Kirigami.Heading {
             text: i18nc("@title", "Screen Layout")
             level: 2
@@ -185,7 +186,6 @@ Kirigami.ScrollablePage {
             opacity: 0.7
         }
 
-        // Player count selector
         RowLayout {
             Layout.fillWidth: true
             spacing: Kirigami.Units.largeSpacing
@@ -208,7 +208,6 @@ Kirigami.ScrollablePage {
             Layout.fillWidth: true
             Layout.topMargin: Kirigami.Units.smallSpacing
 
-            // Horizontal split
             LayoutCard {
                 Layout.fillWidth: true
                 layoutType: "horizontal"
@@ -219,7 +218,6 @@ Kirigami.ScrollablePage {
                 onClicked: layoutMode = "horizontal"
             }
 
-            // Vertical split
             LayoutCard {
                 Layout.fillWidth: true
                 layoutType: "vertical"
@@ -230,19 +228,23 @@ Kirigami.ScrollablePage {
                 onClicked: layoutMode = "vertical"
             }
 
-            // Grid (for 3-4 players)
             LayoutCard {
                 Layout.fillWidth: true
                 layoutType: "grid"
                 selected: layoutMode === "grid"
                 title: i18nc("@option", "Grid")
-                description: i18nc("@info", "2x2 grid layout")
+                description: root.instanceCount === 3
+                    ? (root.gridSubLayout === "grid-2x2"
+                        ? i18nc("@info", "2×2 grid with one empty cell")
+                        : root.gridSubLayout === "left-right"
+                            ? i18nc("@info", "Player 1 left, players 2–3 right")
+                            : i18nc("@info", "3×1 horizontal layout"))
+                    : i18nc("@info", "2×2 grid layout")
                 instanceCount: root.instanceCount
                 visible: root.instanceCount > 2
                 onClicked: layoutMode = "grid"
             }
 
-            // Multi-monitor
             LayoutCard {
                 Layout.fillWidth: true
                 layoutType: "multi-monitor"
@@ -254,7 +256,45 @@ Kirigami.ScrollablePage {
             }
         }
 
-        // Instance Configuration
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.smallSpacing
+            Layout.leftMargin: Kirigami.Units.largeSpacing
+            visible: layoutMode === "grid" && root.instanceCount === 3
+            spacing: Kirigami.Units.mediumSpacing
+
+            Controls.Label {
+                text: i18nc("@label", "Grid arrangement:")
+                opacity: 0.7
+            }
+
+            Repeater {
+                model: ListModel {
+                    ListElement { modeValue: "horizontal"; modeLabel: "3×1 Horizontal" }
+                    ListElement { modeValue: "grid-2x2"; modeLabel: "2×2 Grid" }
+                    ListElement { modeValue: "left-right"; modeLabel: "Left + Right" }
+                }
+
+                Controls.Button {
+                    text: model.modeLabel
+                    flat: true
+                    checked: root.gridSubLayout === model.modeValue
+                    checkable: true
+
+                    onClicked: root.gridSubLayout = model.modeValue
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: -Kirigami.Units.smallSpacing
+                        color: "transparent"
+                        border.width: parent.checked ? 2 : 0
+                        border.color: Kirigami.Theme.highlightColor
+                        radius: Kirigami.Units.smallSpacing
+                    }
+                }
+            }
+        }
+
         Kirigami.Heading {
             text: i18nc("@title", "Instance Configuration")
             level: 2
@@ -278,7 +318,6 @@ Kirigami.ScrollablePage {
                 // Copy revision counter for reliable binding
                 property int cardRevision: root?.instancesRevision ?? 0
                 
-                // Current preset ID (updated when instances change)
                 property string currentPresetId: {
                     void(cardRevision)
                     if (!cardSessionManager) return "steam"
@@ -286,7 +325,6 @@ Kirigami.ScrollablePage {
                     return config?.presetId || "steam"
                 }
                 
-                // Overlay patterns for this instance
                 property var overridePatternsModel: {
                     void(cardRevision)
                     if (!cardSessionManager) return []
@@ -339,7 +377,6 @@ Kirigami.ScrollablePage {
                             Kirigami.FormData.label: instanceCard.labelUser
                             Layout.fillWidth: true
 
-                            // Filtered model: excludes users already assigned to other instances
                             model: root.getAvailableUsers(instanceCard.index)
                             textRole: "username"
                             valueRole: "username"
@@ -359,12 +396,10 @@ Kirigami.ScrollablePage {
                                 currentIndex = -1
                             }
 
-                            // Show placeholder when no users available
                             displayText: count === 0
                                 ? i18nc("@info", "No users available")
                                 : (currentIndex >= 0 ? currentText : i18nc("@info", "Select a user..."))
 
-                            // Update session manager when user selects a different user
                             onActivated: {
                                 if (root.sessionManager && currentValue) {
                                     root.sessionManager.setInstanceUser(instanceCard.index, currentValue)
@@ -372,7 +407,6 @@ Kirigami.ScrollablePage {
                             }
                         }
 
-                        // Warning when no user selected
                         Controls.Label {
                             visible: userCombo.currentIndex < 0 && userCombo.count > 0
                             text: i18nc("@info:status", "Please select a user for this instance")
@@ -382,7 +416,6 @@ Kirigami.ScrollablePage {
                             Layout.fillWidth: true
                         }
 
-                        // Launch preset selector
                         Components.PresetSelector {
                             id: presetSelector
                             Kirigami.FormData.label: instanceCard.labelLauncher
@@ -410,7 +443,6 @@ Kirigami.ScrollablePage {
                             opacity: 0.8
                         }
 
-                        // Show assigned devices
                         RowLayout {
                             Kirigami.FormData.label: instanceCard.labelDevices
                             spacing: Kirigami.Units.smallSpacing
@@ -447,7 +479,6 @@ Kirigami.ScrollablePage {
                             wideMode: (root?.width ?? 0) > Kirigami.Units.gridUnit * 30
 
 
-                            // Config file override patterns - each player gets their own copy
                             RowLayout {
                                 Kirigami.FormData.label: instanceCard.labelOverlay
                                 visible: presetSelector.currentPresetId !== ""
@@ -528,7 +559,6 @@ Kirigami.ScrollablePage {
                             }
                         }
 
-                        // Pattern list display (related to Config Overrides)
                         Rectangle {
                             Layout.fillWidth: true
                             Layout.topMargin: Kirigami.Units.smallSpacing
@@ -547,7 +577,6 @@ Kirigami.ScrollablePage {
                                 anchors.margins: Kirigami.Units.largeSpacing
                                 spacing: Kirigami.Units.smallSpacing
 
-                                // Header
                                 RowLayout {
                                     Layout.fillWidth: true
                                     spacing: Kirigami.Units.smallSpacing
@@ -580,7 +609,6 @@ Kirigami.ScrollablePage {
                                     }
                                 }
 
-                                // Pattern items
                                 Repeater {
                                     model: instanceCard.overridePatternsModel
                                     delegate: RowLayout {
@@ -616,7 +644,6 @@ Kirigami.ScrollablePage {
                                     }
                                 }
 
-                                // Help text
                                 Controls.Label {
                                     Layout.fillWidth: true
                                     text: i18nc("@info", "For games that store saves or config in their own folder. Each player gets their own copy of matching files. Place overrides in the preset's override folder.")
@@ -668,7 +695,6 @@ Kirigami.ScrollablePage {
                         }
                     }
 
-                    // Info message when no device is assigned at all
                     Kirigami.InlineMessage {
                         Layout.fillWidth: true
                         visible: {
@@ -677,7 +703,6 @@ Kirigami.ScrollablePage {
                             void(root.devicesRevision)
                             if (!root.deviceManager) return false
 
-                            // Check if any devices are assigned to this instance
                             let assignedPaths = root.deviceManager.getDevicePathsForInstance(instanceCard.index)
                             if (assignedPaths.length > 0) return false
 
@@ -687,7 +712,7 @@ Kirigami.ScrollablePage {
                                 if (pending[i].instanceIndex == instanceCard.index) return false
                             }
 
-                            // No devices assigned and no pending devices
+                            // No devices assigned and no pending devices — show info
                             return true
                         }
                         type: Kirigami.MessageType.Information
@@ -697,7 +722,6 @@ Kirigami.ScrollablePage {
             }
         }
 
-        // Quick actions
         Kirigami.Separator {
             Layout.fillWidth: true
             Layout.topMargin: Kirigami.Units.largeSpacing
@@ -724,7 +748,6 @@ Kirigami.ScrollablePage {
         }
     }
 
-    // Layout card component for visual selection
     component LayoutCard: Kirigami.AbstractCard {
         id: layoutCard
 
@@ -759,7 +782,6 @@ Kirigami.ScrollablePage {
         contentItem: ColumnLayout {
             spacing: Kirigami.Units.smallSpacing
 
-            // Visual representation
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: Kirigami.Units.gridUnit * 4
@@ -774,7 +796,6 @@ Kirigami.ScrollablePage {
                     ColorAnimation { duration: Kirigami.Units.shortDuration }
                 }
 
-                // Dynamic layout visualization
                 Loader {
                     anchors.fill: parent
                     anchors.margins: 2
@@ -809,7 +830,6 @@ Kirigami.ScrollablePage {
         }
     }
 
-    // Layout visualization components
     Component {
         id: horizontalLayout
         RowLayout {
@@ -856,23 +876,85 @@ Kirigami.ScrollablePage {
 
     Component {
         id: gridLayout
-        GridLayout {
-            columns: 2
-            rows: 2
-            rowSpacing: 2
-            columnSpacing: 2
-            Repeater {
-                model: Math.min(root.instanceCount, 4)
+        Item {
+            anchors.fill: parent
+
+            readonly property bool isLeftRight: root.instanceCount === 3 && root.gridSubLayout === "left-right"
+
+            readonly property int effectiveCols: {
+                if (isLeftRight) return 2;
+                if (root.instanceCount <= 2) return root.instanceCount;
+                if (root.instanceCount === 3) {
+                    return root.gridSubLayout === "grid-2x2" ? 2 : 3;
+                }
+                return 2;
+            }
+            readonly property int effectiveRows: {
+                if (isLeftRight) return 2;
+                if (root.instanceCount <= 2) return 1;
+                if (root.instanceCount === 3) {
+                    return root.gridSubLayout === "grid-2x2" ? 2 : 1;
+                }
+                return 2;
+            }
+
+            GridLayout {
+                anchors.fill: parent
+                columns: parent.effectiveCols
+                rowSpacing: 2
+                columnSpacing: 2
+                visible: !parent.isLeftRight
+                Repeater {
+                    model: root.instanceCount
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: index === 0 ? Kirigami.Theme.highlightColor : Kirigami.Theme.positiveBackgroundColor
+                        opacity: 0.5
+                        radius: 2
+                        Controls.Label {
+                            anchors.centerIn: parent
+                            text: (index + 1).toString()
+                            font.bold: true
+                        }
+                    }
+                }
+            }
+
+            Row {
+                anchors.fill: parent
+                spacing: 2
+                visible: parent.isLeftRight
                 Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: index === 0 ? Kirigami.Theme.highlightColor : Kirigami.Theme.positiveBackgroundColor
+                    width: parent.width * 2 / 5
+                    height: parent.height
+                    color: Kirigami.Theme.highlightColor
                     opacity: 0.5
                     radius: 2
                     Controls.Label {
                         anchors.centerIn: parent
-                        text: (index + 1).toString()
+                        text: "1"
                         font.bold: true
+                    }
+                }
+                Column {
+                    width: parent.width * 3 / 5 - 2
+                    height: parent.height
+                    spacing: 2
+                    Repeater {
+                        model: 2
+                        Rectangle {
+                            width: parent.width
+                            height: (parent.parent.height - 2) / 2
+                            color: Kirigami.Theme.positiveBackgroundColor
+                            opacity: 0.5
+                            radius: 2
+                            Controls.Label {
+                                anchors.centerIn: parent
+                                text: (index + 2).toString()
+                                font.bold: true
+                            }
+                        }
                     }
                 }
             }
