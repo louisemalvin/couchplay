@@ -7,6 +7,12 @@
 #include <QStandardPaths>
 #include <QFile>
 #include <QDir>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+
+#include <KSharedConfig>
+#include <KConfigGroup>
 
 #include "PresetManager.h"
 
@@ -20,18 +26,15 @@ private Q_SLOTS:
     void init();
     void cleanup();
 
-    // Builtin presets tests
     void testBuiltinPresetsExist();
     void testGetCommand();
     void testGetWorkingDirectory();
     void testGetLauncherId();
     void testGetSteamIntegration();
 
-    // Custom presets tests
     void testAddCustomPreset();
     void testRemoveCustomPreset();
 
-    // Shared directories tests
     void testGetSetSharedDirectories();
 
 private:
@@ -48,20 +51,26 @@ void TestPresetManager::cleanupTestCase()
 
 void TestPresetManager::init()
 {
-    // Create temporary directory for each test
     m_tempDir = new QTemporaryDir();
     QVERIFY(m_tempDir->isValid());
 
-    // Set test mode to use temp directory
     QStandardPaths::setTestModeEnabled(true);
 
-    // Create the config directory
     QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(configDir);
 
-    // Remove any existing presets.json to ensure clean state
     QString presetsPath = configDir + QStringLiteral("/presets.json");
     QFile::remove(presetsPath);
+    QFile::remove(presetsPath + QStringLiteral(".bak"));
+
+    KSharedConfig::Ptr config = KSharedConfig::openConfig(QStringLiteral("couchplayrc"));
+    static const QString prefix = QStringLiteral("Preset: ");
+    for (const QString &groupName : config->groupList()) {
+        if (groupName.startsWith(prefix)) {
+            config->deleteGroup(groupName);
+        }
+    }
+    config->sync();
 }
 
 void TestPresetManager::cleanup()
@@ -71,8 +80,6 @@ void TestPresetManager::cleanup()
     QStandardPaths::setTestModeEnabled(false);
 }
 
-// ============ Builtin Presets Tests ============
-
 void TestPresetManager::testBuiltinPresetsExist()
 {
     PresetManager manager;
@@ -80,7 +87,6 @@ void TestPresetManager::testBuiltinPresetsExist()
     QVariantList presets = manager.presetsAsVariant();
     QVERIFY(presets.size() >= 3); // Steam, Heroic, Lutris
 
-    // Check for Steam preset
     bool foundSteam = false;
     bool foundHeroic = false;
     bool foundLutris = false;
@@ -113,15 +119,12 @@ void TestPresetManager::testGetCommand()
 {
     PresetManager manager;
 
-    // Test Steam preset command
     QString steamCommand = manager.getCommand(QStringLiteral("steam"));
     QCOMPARE(steamCommand, QStringLiteral("steam -tenfoot -steamdeck"));
 
-    // Test Heroic preset command
     QString heroicCommand = manager.getCommand(QStringLiteral("heroic"));
     QVERIFY(!heroicCommand.isEmpty());
 
-    // Test Lutris preset command
     QString lutrisCommand = manager.getCommand(QStringLiteral("lutris"));
     QCOMPARE(lutrisCommand, QStringLiteral("lutris"));
 }
@@ -130,7 +133,6 @@ void TestPresetManager::testGetWorkingDirectory()
 {
     PresetManager manager;
 
-    // Builtin presets typically have empty working directories
     QString steamDir = manager.getWorkingDirectory(QStringLiteral("steam"));
     QVERIFY(steamDir.isEmpty());
 
@@ -154,15 +156,11 @@ void TestPresetManager::testGetSteamIntegration()
 {
     PresetManager manager;
 
-    // Steam preset should have integration enabled
     QVERIFY(manager.getSteamIntegration(QStringLiteral("steam")));
 
-    // Heroic and Lutris should have it disabled
     QVERIFY(!manager.getSteamIntegration(QStringLiteral("heroic")));
     QVERIFY(!manager.getSteamIntegration(QStringLiteral("lutris")));
 }
-
-// ============ Custom Presets Tests ============
 
 void TestPresetManager::testAddCustomPreset()
 {
@@ -181,7 +179,6 @@ void TestPresetManager::testAddCustomPreset()
     QVERIFY(id.startsWith(QStringLiteral("custom-")));
     QCOMPARE(presetsChangedSpy.count(), 1);
 
-    // Verify preset was added
     QVariantList presets = manager.presetsAsVariant();
     bool found = false;
     for (const QVariant &presetVar : presets) {
@@ -224,8 +221,6 @@ void TestPresetManager::testRemoveCustomPreset()
         QVERIFY(preset[QStringLiteral("id")] != id);
     }
 }
-
-// ============ Shared Directories Tests ============
 
 void TestPresetManager::testGetSetSharedDirectories()
 {

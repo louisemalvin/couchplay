@@ -3,6 +3,7 @@
 
 #include "PresetManager.h"
 #include "HeroicConfigManager.h"
+#include "Logging.h"
 #include "SteamConfigManager.h"
 
 #include <QDir>
@@ -13,6 +14,9 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QUuid>
+
+#include <KSharedConfig>
+#include <KConfigGroup>
 
 PresetManager::PresetManager(QObject *parent)
     : QObject(parent)
@@ -54,10 +58,9 @@ QStringList PresetManager::getDefaultSharedDirectories(const QString &id) const
         }
     } else if (id == QStringLiteral("heroic")) {
         if (m_heroicConfigManager && m_heroicConfigManager->isHeroicDetected()) {
-            // NOTE: configPath is NOT added to shared directories because:
-            // 1. syncConfigToUser() copies specific config files to the gaming user's home
-            // 2. Bind-mounting the config dir would cause ownership conflicts when syncing
-            // Only share the install path where games are installed
+            // Don't share configPath: syncConfigToUser() copies specific config files to the gaming user's home,
+            // and bind-mounting the config dir would cause ownership conflicts when syncing.
+            // Only share the install path where games are installed.
             QString installPath = m_heroicConfigManager->defaultInstallPath();
             if (!installPath.isEmpty()) {
                 dirs.append(installPath);
@@ -83,7 +86,6 @@ void PresetManager::initBuiltinPresets()
 {
     m_builtinPresets.clear();
 
-    // Steam Big Picture preset
     LaunchPreset steam;
     steam.id = QStringLiteral("steam");
     steam.name = QStringLiteral("Steam Big Picture");
@@ -95,7 +97,6 @@ void PresetManager::initBuiltinPresets()
     steam.sharedDirectories = getDefaultSharedDirectories(QStringLiteral("steam"));
     m_builtinPresets.append(steam);
 
-    // Heroic Games preset
     LaunchPreset heroic;
     heroic.id = QStringLiteral("heroic");
     heroic.name = QStringLiteral("Heroic Games");
@@ -104,7 +105,6 @@ void PresetManager::initBuiltinPresets()
     heroic.steamIntegration = false;
     heroic.launcherId = QStringLiteral("heroic");
 
-        // Auto-detect Heroic and populate info
         if (m_heroicConfigManager && m_heroicConfigManager->isHeroicDetected()) {
             heroic.command = m_heroicConfigManager->heroicCommand();
             heroic.launcherInfo.configPath = m_heroicConfigManager->configPath();
@@ -122,7 +122,6 @@ void PresetManager::initBuiltinPresets()
         heroic.sharedDirectories = getDefaultSharedDirectories(QStringLiteral("heroic"));
         m_builtinPresets.append(heroic);
 
-    // Lutris preset
     LaunchPreset lutris;
     lutris.id = QStringLiteral("lutris");
     lutris.name = QStringLiteral("Lutris");
@@ -195,7 +194,6 @@ LaunchPreset PresetManager::getPreset(const QString &id) const
             return preset;
         }
     }
-    // Return default (Steam) if not found
     if (!m_builtinPresets.isEmpty()) {
         return m_builtinPresets.first();
     }
@@ -285,7 +283,6 @@ QString PresetManager::addPresetFromDesktopFile(const QString &desktopFilePath)
         return QString();
     }
 
-    // Check if already exists
     for (const LaunchPreset &existing : m_customPresets) {
         if (existing.desktopFilePath == desktopFilePath) {
             return existing.id;
@@ -348,19 +345,16 @@ void PresetManager::scanApplications()
 {
     m_availableApplications.clear();
 
-    // Standard .desktop file locations
     QStringList searchPaths = {
         QStringLiteral("/usr/share/applications"),
         QStringLiteral("/usr/local/share/applications"),
         QDir::homePath() + QStringLiteral("/.local/share/applications"),
-        // Flatpak
         QDir::homePath() + QStringLiteral("/.local/share/flatpak/exports/share/applications"),
         QStringLiteral("/var/lib/flatpak/exports/share/applications"),
-        // Snap
         QStringLiteral("/var/lib/snapd/desktop/applications")
     };
 
-    QSet<QString> seenNames;  // Avoid duplicates by name
+    QSet<QString> seenNames;
 
     for (const QString &searchPath : searchPaths) {
         QDir dir(searchPath);
@@ -373,12 +367,10 @@ void PresetManager::scanApplications()
             QString filePath = dir.absoluteFilePath(fileName);
             LaunchPreset app = parseDesktopFile(filePath);
 
-            // Skip invalid or already seen
             if (app.name.isEmpty() || seenNames.contains(app.name)) {
                 continue;
             }
 
-            // Skip if already added as a custom preset
             bool alreadyAdded = false;
             for (const LaunchPreset &custom : m_customPresets) {
                 if (custom.desktopFilePath == filePath) {
@@ -395,7 +387,6 @@ void PresetManager::scanApplications()
         }
     }
 
-    // Sort by name
     std::sort(m_availableApplications.begin(), m_availableApplications.end(),
               [](const LaunchPreset &a, const LaunchPreset &b) {
                   return a.name.toLower() < b.name.toLower();
@@ -418,30 +409,25 @@ LaunchPreset PresetManager::parseDesktopFile(const QString &filePath) const
         return preset;
     }
 
-    // Use QSettings to parse INI-like .desktop format
     QSettings desktop(filePath, QSettings::IniFormat);
     desktop.beginGroup(QStringLiteral("Desktop Entry"));
 
-    // Check if it's an application
     QString type = desktop.value(QStringLiteral("Type")).toString();
     if (type != QStringLiteral("Application")) {
         return preset;
     }
 
-    // Skip hidden entries
     if (desktop.value(QStringLiteral("Hidden"), false).toBool() ||
         desktop.value(QStringLiteral("NoDisplay"), false).toBool()) {
         return preset;
     }
 
-    // Extract fields
     preset.name = desktop.value(QStringLiteral("Name")).toString();
     preset.command = cleanExecCommand(desktop.value(QStringLiteral("Exec")).toString());
     preset.workingDirectory = desktop.value(QStringLiteral("Path")).toString();
     preset.iconName = desktop.value(QStringLiteral("Icon")).toString();
     preset.desktopFilePath = filePath;
 
-    // Check Categories for Game - could filter to only games in the future
     // QString categories = desktop.value(QStringLiteral("Categories")).toString();
 
     return preset;
@@ -451,23 +437,20 @@ QString PresetManager::cleanExecCommand(const QString &exec)
 {
     QString cleaned = exec;
 
-    // Remove freedesktop field codes
-    // These are placeholders for file arguments, URLs, etc.
     static const QStringList fieldCodes = {
-        QStringLiteral("%f"), QStringLiteral("%F"),  // File(s)
-        QStringLiteral("%u"), QStringLiteral("%U"),  // URL(s)
-        QStringLiteral("%d"), QStringLiteral("%D"),  // Directory (deprecated)
-        QStringLiteral("%n"), QStringLiteral("%N"),  // Filename (deprecated)
-        QStringLiteral("%i"),                         // Icon
-        QStringLiteral("%c"),                         // Translated name
-        QStringLiteral("%k")                          // Desktop file path
+        QStringLiteral("%f"), QStringLiteral("%F"),
+        QStringLiteral("%u"), QStringLiteral("%U"),
+        QStringLiteral("%d"), QStringLiteral("%D"),
+        QStringLiteral("%n"), QStringLiteral("%N"),
+        QStringLiteral("%i"),
+        QStringLiteral("%c"),
+        QStringLiteral("%k")
     };
 
     for (const QString &code : fieldCodes) {
         cleaned.remove(code);
     }
 
-    // Clean up any double spaces and trim
     cleaned = cleaned.simplified();
 
     return cleaned;
@@ -479,59 +462,32 @@ QString PresetManager::generateCustomId()
            QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
 }
 
-QString PresetManager::configFilePath() const
-{
-    QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    return configDir + QStringLiteral("/presets.json");
-}
-
 void PresetManager::loadCustomPresets()
 {
     m_customPresets.clear();
 
-    QString filePath = configFilePath();
-    QFile file(filePath);
+    KSharedConfig::Ptr config = KSharedConfig::openConfig(QStringLiteral("couchplayrc"));
+    const QStringList groups = config->groupList();
 
-    if (!file.exists()) {
-        return;
-    }
+    static const QString prefix = QStringLiteral("Preset: ");
 
-    if (!file.open(QIODevice::ReadOnly)) {
-        qWarning() << "Failed to open presets file:" << filePath;
-        return;
-    }
+    for (const QString &groupName : groups) {
+        if (!groupName.startsWith(prefix)) {
+            continue;
+        }
 
-    QByteArray data = file.readAll();
-    file.close();
-
-    QJsonParseError error;
-    QJsonDocument doc = QJsonDocument::fromJson(data, &error);
-
-    if (error.error != QJsonParseError::NoError) {
-        qWarning() << "Failed to parse presets JSON:" << error.errorString();
-        return;
-    }
-
-    QJsonObject root = doc.object();
-    QJsonArray presetsArray = root[QStringLiteral("customPresets")].toArray();
-
-    for (const QJsonValue &value : presetsArray) {
-        QJsonObject obj = value.toObject();
+        KConfigGroup group = config->group(groupName);
 
         LaunchPreset preset;
-        preset.id = obj[QStringLiteral("id")].toString();
-        preset.name = obj[QStringLiteral("name")].toString();
-        preset.command = obj[QStringLiteral("command")].toString();
-        preset.workingDirectory = obj[QStringLiteral("workingDirectory")].toString();
-        preset.iconName = obj[QStringLiteral("iconName")].toString();
-        preset.desktopFilePath = obj[QStringLiteral("desktopFilePath")].toString();
+        preset.id = group.readEntry(QStringLiteral("id"), QString());
+        preset.name = group.readEntry(QStringLiteral("name"), QString());
+        preset.command = group.readEntry(QStringLiteral("command"), QString());
+        preset.workingDirectory = group.readEntry(QStringLiteral("workingDirectory"), QString());
+        preset.iconName = group.readEntry(QStringLiteral("iconName"), QString());
+        preset.desktopFilePath = group.readEntry(QStringLiteral("desktopFilePath"), QString());
         preset.isBuiltin = false;
-        preset.steamIntegration = obj[QStringLiteral("steamIntegration")].toBool();
-
-        QJsonArray dirsArray = obj[QStringLiteral("sharedDirectories")].toArray();
-        for (const QJsonValue &dirValue : dirsArray) {
-            preset.sharedDirectories.append(dirValue.toString());
-        }
+        preset.steamIntegration = group.readEntry(QStringLiteral("steamIntegration"), false);
+        preset.sharedDirectories = group.readEntry(QStringLiteral("sharedDirectories"), QStringList());
 
         if (!preset.id.isEmpty() && !preset.name.isEmpty()) {
             m_customPresets.append(preset);
@@ -541,44 +497,30 @@ void PresetManager::loadCustomPresets()
 
 void PresetManager::saveCustomPresets()
 {
-    QString filePath = configFilePath();
+    KSharedConfig::Ptr config = KSharedConfig::openConfig(QStringLiteral("couchplayrc"));
 
-    // Ensure directory exists
-    QFileInfo fileInfo(filePath);
-    QDir().mkpath(fileInfo.absolutePath());
+    static const QString prefix = QStringLiteral("Preset: ");
 
-    QJsonArray presetsArray;
-    for (const LaunchPreset &preset : m_customPresets) {
-        QJsonObject obj;
-        obj[QStringLiteral("id")] = preset.id;
-        obj[QStringLiteral("name")] = preset.name;
-        obj[QStringLiteral("command")] = preset.command;
-        obj[QStringLiteral("workingDirectory")] = preset.workingDirectory;
-        obj[QStringLiteral("iconName")] = preset.iconName;
-        obj[QStringLiteral("desktopFilePath")] = preset.desktopFilePath;
-        obj[QStringLiteral("steamIntegration")] = preset.steamIntegration;
-        
-        QJsonArray dirsArray;
-        for (const QString &dir : preset.sharedDirectories) {
-            dirsArray.append(dir);
+    QStringList existingGroups = config->groupList();
+    for (const QString &groupName : existingGroups) {
+        if (groupName.startsWith(prefix)) {
+            config->deleteGroup(groupName);
         }
-        obj[QStringLiteral("sharedDirectories")] = dirsArray;
-        
-        presetsArray.append(obj);
     }
 
-    QJsonObject root;
-    root[QStringLiteral("customPresets")] = presetsArray;
+    for (const LaunchPreset &preset : m_customPresets) {
+        QString groupName = prefix + preset.id;
+        KConfigGroup group = config->group(groupName);
 
-    QJsonDocument doc(root);
-
-    QFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly)) {
-        qWarning() << "Failed to save presets file:" << filePath;
-        Q_EMIT errorOccurred(QStringLiteral("Failed to save presets"));
-        return;
+        group.writeEntry(QStringLiteral("id"), preset.id);
+        group.writeEntry(QStringLiteral("name"), preset.name);
+        group.writeEntry(QStringLiteral("command"), preset.command);
+        group.writeEntry(QStringLiteral("workingDirectory"), preset.workingDirectory);
+        group.writeEntry(QStringLiteral("iconName"), preset.iconName);
+        group.writeEntry(QStringLiteral("desktopFilePath"), preset.desktopFilePath);
+        group.writeEntry(QStringLiteral("steamIntegration"), preset.steamIntegration);
+        group.writeEntry(QStringLiteral("sharedDirectories"), preset.sharedDirectories);
     }
 
-    file.write(doc.toJson(QJsonDocument::Indented));
-    file.close();
+    config->sync();
 }

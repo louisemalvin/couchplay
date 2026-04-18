@@ -24,7 +24,7 @@ GamescopeInstance::~GamescopeInstance()
 
 bool GamescopeInstance::start(const QVariantMap &config, int index)
 {
-    if (m_helperPid > 0 || (m_process && m_process->state() != QProcess::NotRunning)) {
+    if (m_helperPid > 0) {
         Q_EMIT errorOccurred(QStringLiteral("Instance already running"));
         return false;
     }
@@ -32,7 +32,6 @@ bool GamescopeInstance::start(const QVariantMap &config, int index)
     m_index = index;
     m_username = config.value(QStringLiteral("username")).toString();
 
-    // Store window geometry for UI display
     int posX = config.value(QStringLiteral("positionX"), 0).toInt();
     int posY = config.value(QStringLiteral("positionY"), 0).toInt();
     int outputW = config.value(QStringLiteral("outputWidth"), 960).toInt();
@@ -40,42 +39,16 @@ bool GamescopeInstance::start(const QVariantMap &config, int index)
     m_windowGeometry = QRect(posX, posY, outputW, outputH);
     Q_EMIT configChanged();
 
-    // Build gamescope arguments
     QStringList gamescopeArgs = buildGamescopeArgs(config);
-
-    // Build environment
     QStringList envVars = buildEnvironment(config);
 
-    // Get preset command from SessionRunner (resolved from PresetManager)
-    // Fallback to Steam Big Picture if no preset command provided
+    // Fallback to Steam Big Picture if no preset configured
     QString gameCommand = config.value(QStringLiteral("presetCommand")).toString();
-    QString workingDirectory = config.value(QStringLiteral("presetWorkingDirectory")).toString();
-    
     if (gameCommand.isEmpty()) {
-        // Fallback to Steam Big Picture if no preset configured
         gameCommand = QStringLiteral("steam -tenfoot -steamdeck");
     }
-    
-    // Verify we have a command to run
-    if (gameCommand.isEmpty()) {
-        Q_EMIT errorOccurred(QStringLiteral("No game command configured"));
-        return false;
-    }
 
-    // Create process
-    m_process = new QProcess(this);
-
-    connect(m_process, &QProcess::started, this, &GamescopeInstance::onProcessStarted);
-    connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this, &GamescopeInstance::onProcessFinished);
-    connect(m_process, &QProcess::errorOccurred, this, &GamescopeInstance::onProcessError);
-    connect(m_process, &QProcess::readyReadStandardOutput, this, &GamescopeInstance::onReadyReadStandardOutput);
-    connect(m_process, &QProcess::readyReadStandardError, this, &GamescopeInstance::onReadyReadStandardError);
-
-    // All instances go through the D-Bus helper service
-    // This provides uniform handling for all users, including the compositor user
-    
-    // Use the D-Bus helper to launch the instance
+    // Launch via D-Bus helper for uniform handling across all users (including compositor user)
     QDBusInterface helper(
         QStringLiteral("io.github.hikaps.CouchPlayHelper"),
         QStringLiteral("/io/github/hikaps/CouchPlayHelper"),
@@ -86,14 +59,13 @@ bool GamescopeInstance::start(const QVariantMap &config, int index)
     if (!helper.isValid()) {
         qWarning() << "Instance" << m_index << "helper service not available";
         Q_EMIT errorOccurred(QStringLiteral("CouchPlay Helper service is not available. Please run: sudo ./scripts/install-helper.sh install"));
-        m_process->deleteLater();
-        m_process = nullptr;
         return false;
     }
     
-    // Use the helper service to launch the instance
     // compositorUid is the UID of the user running CouchPlay (owns the Wayland socket)
     uid_t compositorUid = getuid();
+    
+    QStringList bindPaths = config.value(QStringLiteral("bindPaths")).toStringList();
     
     QDBusReply<qint64> reply = helper.call(
         QStringLiteral("LaunchInstance"),
@@ -101,14 +73,13 @@ bool GamescopeInstance::start(const QVariantMap &config, int index)
         static_cast<uint>(compositorUid),
         gamescopeArgs,
         gameCommand,
-        envVars
+        envVars,
+        bindPaths
     );
     
     if (!reply.isValid()) {
         qWarning() << "Instance" << m_index << "helper LaunchInstance failed:" << reply.error().message();
         Q_EMIT errorOccurred(QStringLiteral("Failed to launch instance: %1").arg(reply.error().message()));
-        m_process->deleteLater();
-        m_process = nullptr;
         return false;
     }
     
@@ -116,8 +87,6 @@ bool GamescopeInstance::start(const QVariantMap &config, int index)
     if (m_helperPid == 0) {
         qWarning() << "Instance" << m_index << "helper returned PID 0";
         Q_EMIT errorOccurred(QStringLiteral("Helper service failed to launch instance"));
-        m_process->deleteLater();
-        m_process = nullptr;
         return false;
     }
     
@@ -128,8 +97,15 @@ bool GamescopeInstance::start(const QVariantMap &config, int index)
     }
     Q_EMIT gamescopePidChanged();
     setStatus(QStringLiteral("Running as %1").arg(m_username));
+
+    QDBusConnection::systemBus().connect(
+        QStringLiteral("io.github.hikaps.CouchPlayHelper"),
+        QStringLiteral("/io/github/hikaps/CouchPlayHelper"),
+        QStringLiteral("io.github.hikaps.CouchPlayHelper"),
+        QStringLiteral("instanceStopped"),
+        this, SLOT(onHelperInstanceStopped(QString, qint64, QString))
+    );
     
-    // Signal running immediately since helper-launched instances don't use QProcess signals
     Q_EMIT runningChanged();
     Q_EMIT started();
 
@@ -138,17 +114,26 @@ bool GamescopeInstance::start(const QVariantMap &config, int index)
 
 void GamescopeInstance::stop(int timeoutMs)
 {
-    // Handle helper-launched instances
+    Q_UNUSED(timeoutMs)
+
     if (m_helperPid > 0) {
         setStatus(QStringLiteral("Stopping..."));
-        
+
+        QDBusConnection::systemBus().disconnect(
+            QStringLiteral("io.github.hikaps.CouchPlayHelper"),
+            QStringLiteral("/io/github/hikaps/CouchPlayHelper"),
+            QStringLiteral("io.github.hikaps.CouchPlayHelper"),
+            QStringLiteral("instanceStopped"),
+            this, SLOT(onHelperInstanceStopped(QString, qint64, QString))
+        );
+
         QDBusInterface helper(
             QStringLiteral("io.github.hikaps.CouchPlayHelper"),
             QStringLiteral("/io/github/hikaps/CouchPlayHelper"),
             QStringLiteral("io.github.hikaps.CouchPlayHelper"),
             QDBusConnection::systemBus()
         );
-        
+
         if (helper.isValid()) {
             QDBusReply<bool> reply = helper.call(QStringLiteral("StopInstance"), m_helperPid);
             if (!reply.isValid() || !reply.value()) {
@@ -156,7 +141,7 @@ void GamescopeInstance::stop(int timeoutMs)
                 helper.call(QStringLiteral("KillInstance"), m_helperPid);
             }
         }
-        
+
         m_helperPid = 0;
         m_gamescopePid = 0;
         setStatus(QStringLiteral("Stopped"));
@@ -164,50 +149,32 @@ void GamescopeInstance::stop(int timeoutMs)
         Q_EMIT stopped();
         return;
     }
-
-    if (!m_process) {
-        return;
-    }
-
-    if (m_process->state() != QProcess::NotRunning) {
-        setStatus(QStringLiteral("Stopping..."));
-
-        m_process->terminate();
-
-        if (!m_process->waitForFinished(timeoutMs)) {
-            qWarning() << "Instance" << m_index << "did not stop gracefully, killing...";
-            m_process->kill();
-            m_process->waitForFinished(2000);
-        }
-    }
-
-    m_process->deleteLater();
-    m_process = nullptr;
-
-    m_gamescopePid = 0;
-
-    setStatus(QStringLiteral("Stopped"));
-    Q_EMIT runningChanged();
-    Q_EMIT stopped();
 }
 
 void GamescopeInstance::kill()
 {
-    // Handle helper-launched instances
     if (m_helperPid > 0) {
         setStatus(QStringLiteral("Killing..."));
-        
+
+        QDBusConnection::systemBus().disconnect(
+            QStringLiteral("io.github.hikaps.CouchPlayHelper"),
+            QStringLiteral("/io/github/hikaps/CouchPlayHelper"),
+            QStringLiteral("io.github.hikaps.CouchPlayHelper"),
+            QStringLiteral("instanceStopped"),
+            this, SLOT(onHelperInstanceStopped(QString, qint64, QString))
+        );
+
         QDBusInterface helper(
             QStringLiteral("io.github.hikaps.CouchPlayHelper"),
             QStringLiteral("/io/github/hikaps/CouchPlayHelper"),
             QStringLiteral("io.github.hikaps.CouchPlayHelper"),
             QDBusConnection::systemBus()
         );
-        
+
         if (helper.isValid()) {
             helper.call(QStringLiteral("KillInstance"), m_helperPid);
         }
-        
+
         m_helperPid = 0;
         m_gamescopePid = 0;
         setStatus(QStringLiteral("Killed"));
@@ -215,34 +182,11 @@ void GamescopeInstance::kill()
         Q_EMIT stopped();
         return;
     }
-
-    if (!m_process) {
-        return;
-    }
-
-    if (m_process->state() != QProcess::NotRunning) {
-        setStatus(QStringLiteral("Killing..."));
-        m_process->kill();
-        m_process->waitForFinished(2000);
-    }
-
-    m_process->deleteLater();
-    m_process = nullptr;
-
-    m_gamescopePid = 0;
-
-    setStatus(QStringLiteral("Killed"));
-    Q_EMIT runningChanged();
-    Q_EMIT stopped();
 }
 
 bool GamescopeInstance::isRunning() const
 {
-    // Check helper-launched instances
-    if (m_helperPid > 0) {
-        return true;  // Assume running if we have a PID (we can't easily check)
-    }
-    return m_process && m_process->state() == QProcess::Running;
+    return m_helperPid > 0;
 }
 
 void GamescopeInstance::setStatus(const QString &status)
@@ -257,15 +201,12 @@ QStringList GamescopeInstance::buildGamescopeArgs(const QVariantMap &config)
 {
     QStringList args;
 
-    // Steam integration - expose Steam-specific window properties
-    // Only enable for presets that require it (e.g., Steam Big Picture mode)
+    // Steam integration - only enable for presets that require it (e.g., Steam Big Picture)
     bool steamIntegration = config.value(QStringLiteral("steamIntegration"), false).toBool();
     if (steamIntegration) {
         args << QStringLiteral("-e");
     }
 
-    // Borderless window (optional - allows positioning but removes decorations)
-    // Default is false (decorated windows for resizing)
     bool borderless = config.value(QStringLiteral("borderless"), false).toBool();
     if (borderless) {
         args << QStringLiteral("-b");
@@ -274,19 +215,16 @@ QStringList GamescopeInstance::buildGamescopeArgs(const QVariantMap &config)
     // Note: Don't pass --backend flag - let gamescope auto-detect
     // It will use wayland backend when WAYLAND_DISPLAY is set
 
-    // Internal resolution (game renders at this)
     int internalW = config.value(QStringLiteral("internalWidth"), 1920).toInt();
     int internalH = config.value(QStringLiteral("internalHeight"), 1080).toInt();
     args << QStringLiteral("-w") << QString::number(internalW);
     args << QStringLiteral("-h") << QString::number(internalH);
 
-    // Output resolution (window size)
     int outputW = config.value(QStringLiteral("outputWidth"), 960).toInt();
     int outputH = config.value(QStringLiteral("outputHeight"), 1080).toInt();
     args << QStringLiteral("-W") << QString::number(outputW);
     args << QStringLiteral("-H") << QString::number(outputH);
 
-    // Refresh rate
     int refreshRate = config.value(QStringLiteral("refreshRate"), 60).toInt();
     if (refreshRate > 0) {
         args << QStringLiteral("-r") << QString::number(refreshRate);
@@ -304,17 +242,9 @@ QStringList GamescopeInstance::buildGamescopeArgs(const QVariantMap &config)
         args << QStringLiteral("-F") << filterMode;
     }
 
-    // Window position for split-screen layouts
-    // NOTE: --position is not available in all gamescope versions
-    // For now, we skip positioning and let the window manager handle it
-    // TODO: Investigate using xdotool/wmctrl for window positioning after spawn
-    // int posX = config.value(QStringLiteral("positionX"), -1).toInt();
-    // int posY = config.value(QStringLiteral("positionY"), -1).toInt();
-    // if (posX >= 0 && posY >= 0) {
-    //     args << QStringLiteral("--position") << QStringLiteral("%1,%2").arg(posX).arg(posY);
-    // }
+    // Window positioning is handled by WindowManager via KWin scripting
+    // (gamescope does not have a --position flag)
 
-    // Monitor selection (for multi-monitor setups)
     QString monitorName = config.value(QStringLiteral("monitorName")).toString();
     if (!monitorName.isEmpty()) {
         args << QStringLiteral("--prefer-output") << monitorName;
@@ -344,11 +274,8 @@ QStringList GamescopeInstance::buildEnvironment(const QVariantMap &config)
     // Mesa threading for better performance
     envVars << QStringLiteral("mesa_glthread=true");
     
-    // Set desktop environment for XDG portal integration
-    // This enables native file dialogs in Steam and other applications
+    // Set desktop environment for XDG portal integration (native file dialogs in Steam etc.)
     envVars << QStringLiteral("XDG_CURRENT_DESKTOP=KDE");
-    
-    // Force GTK applications to use XDG portals for file dialogs
     envVars << QStringLiteral("GTK_USE_PORTAL=1");
     
     return envVars;
@@ -388,71 +315,35 @@ qint64 GamescopeInstance::resolveGamescopePid(qint64 launchedPid)
     return 0;
 }
 
-void GamescopeInstance::onProcessStarted()
+void GamescopeInstance::onHelperInstanceStopped(const QString &username, qint64 pid, const QString &reason)
 {
-    m_gamescopePid = m_process->processId();
-    Q_EMIT gamescopePidChanged();
-    setStatus(QStringLiteral("Running"));
-    Q_EMIT runningChanged();
-    Q_EMIT started();
-}
+    Q_UNUSED(username)
 
-void GamescopeInstance::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus)
-{
-    QString statusStr;
-    if (exitStatus == QProcess::CrashExit) {
-        statusStr = QStringLiteral("Crashed (code %1)").arg(exitCode);
-    } else if (exitCode == 0) {
-        statusStr = QStringLiteral("Exited normally");
-    } else {
-        statusStr = QStringLiteral("Exited (code %1)").arg(exitCode);
+    if (pid != m_helperPid) {
+        return;
     }
 
-    setStatus(statusStr);
+    QDBusConnection::systemBus().disconnect(
+        QStringLiteral("io.github.hikaps.CouchPlayHelper"),
+        QStringLiteral("/io/github/hikaps/CouchPlayHelper"),
+        QStringLiteral("io.github.hikaps.CouchPlayHelper"),
+        QStringLiteral("instanceStopped"),
+        this, SLOT(onHelperInstanceStopped(QString, qint64, QString))
+    );
+
+    QString statusMsg;
+    if (reason == QStringLiteral("crashed")) {
+        statusMsg = QStringLiteral("Crashed");
+    } else if (reason == QStringLiteral("failed")) {
+        statusMsg = QStringLiteral("Failed");
+    } else {
+        statusMsg = QStringLiteral("Exited unexpectedly");
+    }
+
+    m_helperPid = 0;
+    m_gamescopePid = 0;
+    setStatus(statusMsg);
     Q_EMIT runningChanged();
     Q_EMIT stopped();
-}
-
-void GamescopeInstance::onProcessError(QProcess::ProcessError error)
-{
-    QString errorMsg;
-    switch (error) {
-    case QProcess::FailedToStart:
-        errorMsg = QStringLiteral("Failed to start gamescope - is it installed?");
-        break;
-    case QProcess::Crashed:
-        errorMsg = QStringLiteral("Gamescope crashed unexpectedly");
-        break;
-    case QProcess::Timedout:
-        errorMsg = QStringLiteral("Gamescope operation timed out");
-        break;
-    case QProcess::WriteError:
-        errorMsg = QStringLiteral("Failed to write to gamescope process");
-        break;
-    case QProcess::ReadError:
-        errorMsg = QStringLiteral("Failed to read from gamescope process");
-        break;
-    default:
-        errorMsg = QStringLiteral("Unknown process error");
-    }
-
-    setStatus(errorMsg);
-    Q_EMIT errorOccurred(errorMsg);
-    qWarning() << "Instance" << m_index << "error:" << errorMsg;
-}
-
-void GamescopeInstance::onReadyReadStandardOutput()
-{
-    QString output = QString::fromUtf8(m_process->readAllStandardOutput());
-    if (!output.trimmed().isEmpty()) {
-        Q_EMIT outputReceived(output);
-    }
-}
-
-void GamescopeInstance::onReadyReadStandardError()
-{
-    QString output = QString::fromUtf8(m_process->readAllStandardError());
-    if (!output.trimmed().isEmpty()) {
-        Q_EMIT outputReceived(QStringLiteral("[stderr] ") + output);
-    }
+    Q_EMIT errorOccurred(statusMsg);
 }

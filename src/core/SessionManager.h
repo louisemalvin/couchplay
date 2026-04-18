@@ -35,12 +35,10 @@ struct InstanceConfig {
     Q_PROPERTY(QString steamAppId MEMBER steamAppId)
     Q_PROPERTY(QString presetId MEMBER presetId)
     Q_PROPERTY(QStringList sharedDirectories MEMBER sharedDirectories)
-    Q_PROPERTY(bool overlayEnabled MEMBER overlayEnabled)
-    Q_PROPERTY(QString overlayGamePath MEMBER overlayGamePath)
+    Q_PROPERTY(QString overrideGamePath MEMBER overrideGamePath)
     Q_PROPERTY(QStringList overrideFiles MEMBER overrideFiles)
-    Q_PROPERTY(QStringList overlayPatterns MEMBER overlayPatterns)
+    Q_PROPERTY(QStringList overridePatterns MEMBER overridePatterns)
     Q_PROPERTY(bool borderless MEMBER borderless)
-
 
 public:
     QString username;
@@ -59,10 +57,9 @@ public:
     QString steamAppId;                              // Steam App ID for Steam launch mode
     QString presetId = QStringLiteral("steam");      // ID of the launch preset to use
     QStringList sharedDirectories;                   // Per-instance shared directories (from preset)
-    bool overlayEnabled = false;
-    QString overlayGamePath;
+    QString overrideGamePath;
     QStringList overrideFiles;
-    QStringList overlayPatterns;                      // Glob patterns for per-user overrides
+    QStringList overridePatterns;                     // Glob patterns for per-user overrides
     bool borderless = false;                           // Window border visibility (false = show borders)
 };
 
@@ -75,11 +72,13 @@ struct SessionProfile {
     Q_GADGET
     Q_PROPERTY(QString name MEMBER name)
     Q_PROPERTY(QString layout MEMBER layout)
+    Q_PROPERTY(QString gridSubLayout MEMBER gridSubLayout)
     Q_PROPERTY(QString filePath MEMBER filePath)
 
 public:
     QString name;
-    QString layout = QStringLiteral("horizontal"); // horizontal, vertical, multi-monitor
+    QString layout = QStringLiteral("horizontal"); // horizontal, vertical, multi-monitor, grid
+    QString gridSubLayout; // "horizontal" (3×1) or "grid-2x2" (2×2 with gap) — only used when layout is "grid"
     QString filePath;
     QList<InstanceConfig> instances;
 };
@@ -95,6 +94,7 @@ class SessionManager : public QObject
     QML_ELEMENT
     Q_PROPERTY(QString currentProfileName READ currentProfileName NOTIFY currentProfileChanged)
     Q_PROPERTY(QString currentLayout READ currentLayout WRITE setCurrentLayout NOTIFY currentLayoutChanged)
+    Q_PROPERTY(QString currentGridSubLayout READ currentGridSubLayout WRITE setCurrentGridSubLayout NOTIFY currentGridSubLayoutChanged)
     Q_PROPERTY(int instanceCount READ instanceCount WRITE setInstanceCount NOTIFY instanceCountChanged)
     Q_PROPERTY(QVariantList savedProfiles READ savedProfilesAsVariant NOTIFY savedProfilesChanged)
     Q_PROPERTY(QVariantList instances READ instancesAsVariant NOTIFY instancesChanged)
@@ -141,6 +141,8 @@ public:
     QString currentProfileName() const { return m_currentProfile.name; }
     QString currentLayout() const { return m_currentProfile.layout; }
     void setCurrentLayout(const QString &layout);
+    QString currentGridSubLayout() const { return m_currentProfile.gridSubLayout; }
+    void setCurrentGridSubLayout(const QString &subLayout);
     int instanceCount() const { return m_currentProfile.instances.size(); }
     void setInstanceCount(int count);
 
@@ -153,6 +155,7 @@ public:
 Q_SIGNALS:
     void currentProfileChanged();
     void currentLayoutChanged();
+    void currentGridSubLayoutChanged();
     void instanceCountChanged();
     void savedProfilesChanged();
     void instancesChanged();

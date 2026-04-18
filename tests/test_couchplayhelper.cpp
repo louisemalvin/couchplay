@@ -8,19 +8,22 @@
 #include <QDBusInterface>
 #include <QDBusReply>
 
+#define private public
 #include "../helper/CouchPlayHelper.h"
+#undef private
 #include "../helper/SystemOps.h"
 
-// Mock SystemOps for testing - no real system calls
 class MockSystemOps : public SystemOps
 {
 public:
     MockSystemOps() = default;
     ~MockSystemOps() override = default;
 
-    // Configuration methods for test setup
     void setAuthResult(bool authorized) { m_authorized = authorized; }
     void setProcessExitCode(int exitCode) { m_processExitCode = exitCode; }
+    void setMockProcessStart(bool mock) { m_mockProcessStart = mock; }
+    void setStandardOutput(const QByteArray &output) { m_standardOutput = output; }
+    void setStandardError(const QByteArray &output) { m_standardError = output; }
     void setUserExists(const QString &username, bool exists, uint uid = 0, gid_t gid = 0, const QString &home = QString()) {
         if (exists) {
             struct passwd pw;
@@ -31,7 +34,6 @@ public:
             m_pwEntries.remove(username);
         }
     }
-
 
     void setGroupExists(const QString &groupname, bool exists, gid_t gid = 0, const QStringList &members = {}) {
         if (exists) {
@@ -47,7 +49,6 @@ public:
     void setChownResult(int result) { m_chownResult = result; }
     void setChmodResult(int result) { m_chmodResult = result; }
 
-    // Clear all mock data
     void clear() {
         m_pwEntries.clear();
         m_grEntries.clear();
@@ -58,13 +59,21 @@ public:
         m_chownResult = 0;
         m_chmodResult = 0;
         m_processArgs.clear();
+        m_processInvocations.clear();
+        m_mockProcessStart = false;
+        m_standardOutput.clear();
+        m_standardError.clear();
     }
 
-    // Get last process arguments for verification
     QStringList getLastProcessArgs() const { return m_processArgs; }
     QString getLastProcessCommand() const { return m_processCommand; }
 
-    // User/group lookup operations
+    struct ProcessInvocation {
+        QString command;
+        QStringList args;
+    };
+    QList<ProcessInvocation> m_processInvocations;
+
     struct passwd *getpwnam(const char *name) override {
         QString username = QString::fromLocal8Bit(name);
         if (m_pwEntries.contains(username)) {
@@ -95,7 +104,6 @@ public:
         return nullptr;
     }
 
-    // Filesystem operations
     bool fileExists(const QString &path) override {
         return m_files.value(path, false);
     }
@@ -106,45 +114,37 @@ public:
 
     bool mkpath(const QString &path) override {
         Q_UNUSED(path)
-        // Always succeed for tests
         return true;
     }
 
     bool removeFile(const QString &path) override {
         Q_UNUSED(path)
-        // Always succeed for tests
         return true;
     }
 
     bool copyFile(const QString &source, const QString &dest) override {
         Q_UNUSED(source)
         Q_UNUSED(dest)
-        // Always succeed for tests
         return true;
     }
 
     bool writeFile(const QString &path, const QByteArray &content) override {
         Q_UNUSED(path)
         Q_UNUSED(content)
-        // Always succeed for tests
         return true;
     }
 
-    // Device path validation
     bool statPath(const QString &path, struct stat *buf) override {
         Q_UNUSED(path)
         Q_UNUSED(buf)
-        // Assume valid for tests
         return true;
     }
 
     bool isCharDevice(mode_t mode) override {
         Q_UNUSED(mode)
-        // Assume valid for tests
         return true;
     }
 
-    // Ownership and permissions
     int chown(const QString &path, uid_t owner, gid_t group) override {
         Q_UNUSED(path)
         Q_UNUSED(owner)
@@ -158,7 +158,6 @@ public:
         return m_chmodResult;
     }
 
-    // Process operations
     QProcess *createProcess(QObject *parent = nullptr) override {
         return new QProcess(parent);
     }
@@ -166,10 +165,18 @@ public:
     void startProcess(QProcess *process, const QString &program, const QStringList &arguments) override {
         m_processCommand = program;
         m_processArgs = arguments;
-        process->start(program, arguments);
+        m_processInvocations.append({program, arguments});
+        if (!m_mockProcessStart) {
+            process->start(program, arguments);
+        }
     }
 
     bool waitForFinished(QProcess *process, int msecs) override {
+        Q_UNUSED(process)
+        Q_UNUSED(msecs)
+        if (m_mockProcessStart) {
+            return true;
+        }
         return process->waitForFinished(msecs);
     }
 
@@ -180,10 +187,14 @@ public:
 
     QByteArray readStandardError(QProcess *process) override {
         Q_UNUSED(process)
-        return QByteArray();
+        return m_standardError;
     }
 
-    // Directory listing
+    QByteArray readAllStandardOutput(QProcess *process) override {
+        Q_UNUSED(process)
+        return m_standardOutput;
+    }
+
     QStringList entryList(const QString &path, const QStringList &nameFilters, QDir::Filters filters) override {
         Q_UNUSED(path)
         Q_UNUSED(nameFilters)
@@ -191,14 +202,12 @@ public:
         return QStringList();
     }
 
-    // Process signaling
     bool killProcess(pid_t pid, int signal) override {
         Q_UNUSED(pid)
         Q_UNUSED(signal)
         return true;
     }
 
-    // Authorization check
     bool checkAuthorization(const QString &action) override {
         Q_UNUSED(action)
         return m_authorized;
@@ -233,7 +242,6 @@ private:
             gr.gr_name = groupBytes.data();
             gr.gr_gid = gid;
 
-            // Build member list
             m_memberPtrs.clear();
             m_memberStrings.clear();
             for (const QString &member : members) {
@@ -258,9 +266,12 @@ private:
     int m_chmodResult = 0;
     QString m_processCommand;
     QStringList m_processArgs;
+
+    bool m_mockProcessStart = false;
+    QByteArray m_standardOutput;
+    QByteArray m_standardError;
 };
 
-// Test class for CouchPlayHelper
 class TestCouchPlayHelper : public QObject
 {
     Q_OBJECT
@@ -331,6 +342,17 @@ private Q_SLOTS:
     // Version test
     void testVersion();
 
+    // Launch/Stop/Kill instance tests
+    void testGenerateServiceName();
+    void testLaunchInstance_basicLaunch();
+    void testLaunchInstance_withBindPaths();
+    void testLaunchInstance_validationEmptyUsername();
+    void testLaunchInstance_validationNonexistentUser();
+    void testStopInstance_serviceStop();
+    void testKillInstance_serviceKill();
+    void testStopInstance_fallbackToDirectKill();
+    void testLaunchInstance_staleUnitRecovery();
+
 private:
     CouchPlayHelper *m_helper = nullptr;
     MockSystemOps *m_ops = nullptr;
@@ -341,26 +363,22 @@ private:
 
 void TestCouchPlayHelper::initTestCase()
 {
-    // Register helper on session bus with unique service name
     m_serviceName = QStringLiteral("io.github.hikaps.CouchPlayHelper.Test");
     m_objectPath = QStringLiteral("/io/github/hikaps/CouchPlayHelper");
 
     m_ops = new MockSystemOps();
     m_ops->clear();
 
-    // Set up default mock data
     m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
     m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
 
     m_helper = new CouchPlayHelper(m_ops);
 
-    // Register object on session bus with ExportAllSlots flag
     if (!QDBusConnection::sessionBus().registerObject(m_objectPath, m_helper,
             QDBusConnection::ExportAllSlots | QDBusConnection::ExportAllSignals)) {
         qFatal("Failed to register CouchPlayHelper on session bus");
     }
 
-    // Register service name on session bus
     if (!QDBusConnection::sessionBus().registerService(m_serviceName)) {
         qFatal("Failed to register service name %s on session bus", qUtf8Printable(m_serviceName));
     }
@@ -368,7 +386,6 @@ void TestCouchPlayHelper::initTestCase()
 
 void TestCouchPlayHelper::cleanupTestCase()
 {
-    // Unregister from session bus
     QDBusConnection::sessionBus().unregisterObject(m_objectPath);
     QDBusConnection::sessionBus().unregisterService(m_serviceName);
 
@@ -382,7 +399,6 @@ void TestCouchPlayHelper::cleanupTestCase()
 
 void TestCouchPlayHelper::init()
 {
-    // Create QDBusInterface for each test
     m_dbusInterface = new QDBusInterface(
         m_serviceName,
         m_objectPath,
@@ -401,8 +417,6 @@ void TestCouchPlayHelper::cleanup()
     m_dbusInterface = nullptr;
     m_ops->clear();
 }
-
-// ============ CreateUser Tests ============
 
 void TestCouchPlayHelper::testCreateUserSuccess()
 {
@@ -506,13 +520,9 @@ void TestCouchPlayHelper::testCreateUserLingerFailure()
         QStringLiteral("Test User")
     );
 
-    // User already exists, so should fail with "already exists"
-    // This tests the user existence check before trying to create
     QVERIFY(!reply.isValid());
     QCOMPARE(reply.error().type(), QDBusError::Failed);
 }
-
-// ============ DeleteUser Tests ============
 
 void TestCouchPlayHelper::testDeleteUserSuccess()
 {
@@ -584,7 +594,7 @@ void TestCouchPlayHelper::testDeleteUserAuthDenied()
 void TestCouchPlayHelper::testDeleteUserNotInCouchPlayGroup()
 {
     m_ops->clear();
-    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {}); // Not in group
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
     m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
     m_ops->setUserExists(QStringLiteral("testuser"), true, 1002, 1002);
 
@@ -616,8 +626,6 @@ void TestCouchPlayHelper::testDeleteUserProcessFailure()
     QCOMPARE(reply.error().type(), QDBusError::Failed);
 }
 
-// ============ IsInCouchPlayGroup Tests ============
-
 void TestCouchPlayHelper::testIsInCouchPlayGroupTrue()
 {
     m_ops->clear();
@@ -635,7 +643,7 @@ void TestCouchPlayHelper::testIsInCouchPlayGroupTrue()
 void TestCouchPlayHelper::testIsInCouchPlayGroupFalse()
 {
     m_ops->clear();
-    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {}); // No members
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
 
     QDBusReply<bool> reply = m_dbusInterface->call(
         QStringLiteral("IsInCouchPlayGroup"),
@@ -663,7 +671,7 @@ void TestCouchPlayHelper::testIsInCouchPlayGroupNonexistent()
 void TestCouchPlayHelper::testIsInCouchPlayGroupNonexistentGroup()
 {
     m_ops->clear();
-    m_ops->setGroupExists(QStringLiteral("couchplay"), false, 0, {}); // Group doesn't exist
+    m_ops->setGroupExists(QStringLiteral("couchplay"), false, 0, {});
 
     QDBusReply<bool> reply = m_dbusInterface->call(
         QStringLiteral("IsInCouchPlayGroup"),
@@ -673,8 +681,6 @@ void TestCouchPlayHelper::testIsInCouchPlayGroupNonexistentGroup()
     QVERIFY(reply.isValid());
     QVERIFY(!reply.value());
 }
-
-// ============ EnableLinger Tests ============
 
 void TestCouchPlayHelper::testEnableLingerSuccess()
 {
@@ -747,8 +753,6 @@ void TestCouchPlayHelper::testEnableLingerProcessFailure()
     QCOMPARE(reply.error().type(), QDBusError::Failed);
 }
 
-// ============ IsLingerEnabled Tests ============
-
 void TestCouchPlayHelper::testIsLingerEnabledTrue()
 {
     m_ops->clear();
@@ -776,8 +780,6 @@ void TestCouchPlayHelper::testIsLingerEnabledFalse()
     QVERIFY(reply.isValid());
     QVERIFY(!reply.value());
 }
-
-// ============ Device Ownership Tests ============
 
 void TestCouchPlayHelper::testChangeDeviceOwnerInvalidPathNotUnderDevInput()
 {
@@ -896,7 +898,7 @@ void TestCouchPlayHelper::testChangeDeviceOwnerChownFails()
     m_ops->clear();
     m_ops->setUserExists(QStringLiteral("testuser"), true, 1000, 1000);
     m_ops->setFileExists(QStringLiteral("/dev/input/event0"), true);
-    m_ops->setChownResult(-1);  // chown fails
+    m_ops->setChownResult(-1);
 
     QDBusReply<bool> reply = m_dbusInterface->call(
         QStringLiteral("ChangeDeviceOwner"),
@@ -914,7 +916,7 @@ void TestCouchPlayHelper::testChangeDeviceOwnerChmodFails()
     m_ops->setUserExists(QStringLiteral("testuser"), true, 1000, 1000);
     m_ops->setFileExists(QStringLiteral("/dev/input/event0"), true);
     m_ops->setChownResult(0);
-    m_ops->setChmodResult(-1);  // chmod fails
+    m_ops->setChmodResult(-1);
 
     QDBusReply<bool> reply = m_dbusInterface->call(
         QStringLiteral("ChangeDeviceOwner"),
@@ -1152,8 +1154,8 @@ void TestCouchPlayHelper::testChangeDeviceOwnerBatchPartialFailure()
     );
 
     QStringList paths = {
-        QStringLiteral("/dev/input/event0"),  // Will succeed
-        QStringLiteral("/dev/sda")  // Invalid path - will fail
+        QStringLiteral("/dev/input/event0"),
+        QStringLiteral("/dev/sda")
     };
 
     QDBusReply<int> reply = m_dbusInterface->call(
@@ -1162,9 +1164,6 @@ void TestCouchPlayHelper::testChangeDeviceOwnerBatchPartialFailure()
         1000u
     );
 
-    // Expect D-Bus error reply (invalid input path) - reply.isValid() will be false
-    // CouchPlayHelper validates paths and returns error for /dev/sda
-    // The partial success (event0) is tracked internally, but D-Bus returns error
     QVERIFY(!reply.isValid());
 }
 
@@ -1174,8 +1173,8 @@ void TestCouchPlayHelper::testChangeDeviceOwnerBatchAllFailure()
     m_ops->setUserExists(QStringLiteral("testuser"), true, 1000, 1000);
 
     QStringList paths = {
-        QStringLiteral("/dev/sda"),  // Invalid path (not under /dev/input)
-        QStringLiteral("/dev/sdb")   // Invalid path (not under /dev/input)
+        QStringLiteral("/dev/sda"),
+        QStringLiteral("/dev/sdb")
     };
 
     QDBusReply<int> reply = m_dbusInterface->call(
@@ -1184,12 +1183,8 @@ void TestCouchPlayHelper::testChangeDeviceOwnerBatchAllFailure()
         1000u
     );
 
-    // Expect D-Bus error reply (both paths invalid) - reply.isValid() will be false
-    // CouchPlayHelper validates paths and returns error for invalid inputs
     QVERIFY(!reply.isValid());
 }
-
-// ============ Runtime Access Tests (Polkit + D-Bus Integration) ============
 
 void TestCouchPlayHelper::testSetupRuntimeAccessSuccess()
 {
@@ -1232,7 +1227,6 @@ void TestCouchPlayHelper::testSetupRuntimeAccessUserNotFound()
 {
     m_ops->clear();
     m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
-    // Compositor user does not exist
 
     QDBusReply<bool> reply = m_dbusInterface->call(
         QStringLiteral("SetupRuntimeAccess"),
@@ -1252,14 +1246,12 @@ void TestCouchPlayHelper::testRemoveRuntimeAccessSuccess()
     m_ops->setFileExists(QStringLiteral("/run/user/1000/wayland-0"), true);
     m_ops->setProcessExitCode(0);
 
-    // First setup runtime access
     QDBusReply<bool> setupReply = m_dbusInterface->call(
         QStringLiteral("SetupRuntimeAccess"),
         1000u
     );
     QVERIFY(setupReply.isValid());
 
-    // Then remove it
     QDBusReply<bool> reply = m_dbusInterface->call(
         QStringLiteral("RemoveRuntimeAccess"),
         1000u
@@ -1307,8 +1299,6 @@ void TestCouchPlayHelper::testRemoveRuntimeAccessUserNotFound()
     QVERIFY(reply.value());
 }
 
-// ============ Version Test ============
-
 void TestCouchPlayHelper::testVersion()
 {
     m_ops->clear();
@@ -1319,6 +1309,331 @@ void TestCouchPlayHelper::testVersion()
 
     QVERIFY(reply.isValid());
     QVERIFY(!reply.value().isEmpty());
+}
+
+void TestCouchPlayHelper::testGenerateServiceName()
+{
+    QCOMPARE(m_helper->generateServiceName(QStringLiteral("player1")),
+             QStringLiteral("couchplay-player1.service"));
+    QCOMPARE(m_helper->generateServiceName(QStringLiteral("test_user")),
+             QStringLiteral("couchplay-test_user.service"));
+    QCOMPARE(m_helper->generateServiceName(QStringLiteral("a")),
+             QStringLiteral("couchplay-a.service"));
+}
+
+void TestCouchPlayHelper::testLaunchInstance_basicLaunch()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+    m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
+    m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001);
+    m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000, QStringLiteral("/home/compositor"));
+    m_ops->setFileExists(QStringLiteral("/run/user/1000"), true);
+    m_ops->setFileExists(QStringLiteral("/run/user/1000/wayland-0"), true);
+    m_ops->setFileExists(QStringLiteral("/usr/bin/gamescope"), true);
+    m_ops->setProcessExitCode(0);
+    m_ops->setMockProcessStart(true);
+    m_ops->setStandardOutput(QByteArray("12345\n"));
+
+    QDBusReply<qint64> reply = m_dbusInterface->call(
+        QStringLiteral("LaunchInstance"),
+        QStringLiteral("player1"),
+        1000u,
+        QStringList{QStringLiteral("-W"), QStringLiteral("960")},
+        QStringLiteral("steam -tenfoot"),
+        QStringList{QStringLiteral("ENABLE_GAMESCOPE_WSI=1")},
+        QStringList()
+    );
+
+    QVERIFY(reply.isValid());
+    QCOMPARE(reply.value(), qint64(12345));
+
+    bool foundSystemdRun = false;
+    for (const auto &inv : m_ops->m_processInvocations) {
+        if (inv.command == QStringLiteral("systemd-run")) {
+            foundSystemdRun = true;
+            QVERIFY(inv.args.contains(QStringLiteral("--unit")));
+            QVERIFY(inv.args.contains(QStringLiteral("couchplay-player1.service")));
+            QVERIFY(inv.args.contains(QStringLiteral("--uid")));
+            QVERIFY(inv.args.contains(QStringLiteral("player1")));
+            QVERIFY(!inv.args.contains(QStringLiteral("--property=Environment=")));
+            QVERIFY(inv.args.contains(QStringLiteral("-E")));
+            QVERIFY(inv.args.contains(QStringLiteral("/usr/bin/gamescope")));
+            QVERIFY(inv.args.contains(QStringLiteral("-W")));
+            QVERIFY(inv.args.contains(QStringLiteral("960")));
+            QVERIFY(inv.args.contains(QStringLiteral("steam -tenfoot")));
+            QVERIFY(inv.args.contains(QStringLiteral("-c")));
+            QVERIFY(inv.args.contains(QStringLiteral("/bin/bash")));
+            break;
+        }
+    }
+    QVERIFY2(foundSystemdRun, "systemd-run should be called");
+
+    bool foundSystemctlShow = false;
+    for (const auto &inv : m_ops->m_processInvocations) {
+        if (inv.command == QStringLiteral("systemctl")
+            && inv.args.contains(QStringLiteral("show"))
+            && inv.args.contains(QStringLiteral("--value"))) {
+            foundSystemctlShow = true;
+            QVERIFY(inv.args.contains(QStringLiteral("couchplay-player1.service")));
+            QVERIFY(inv.args.contains(QStringLiteral("MainPID")));
+            break;
+        }
+    }
+    QVERIFY2(foundSystemctlShow, "systemctl show should be called to get MainPID");
+}
+
+void TestCouchPlayHelper::testLaunchInstance_withBindPaths()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+    m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
+    m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001);
+    m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000, QStringLiteral("/home/compositor"));
+    m_ops->setFileExists(QStringLiteral("/run/user/1000"), true);
+    m_ops->setFileExists(QStringLiteral("/run/user/1000/wayland-0"), true);
+    m_ops->setProcessExitCode(0);
+    m_ops->setMockProcessStart(true);
+    m_ops->setStandardOutput(QByteArray("54321\n"));
+
+    QStringList bindPaths = {QStringLiteral("/overrides/config.ini:/games/config.ini")};
+
+    QDBusReply<qint64> reply = m_dbusInterface->call(
+        QStringLiteral("LaunchInstance"),
+        QStringLiteral("player1"),
+        1000u,
+        QStringList{},
+        QStringLiteral("steam"),
+        QStringList{},
+        bindPaths
+    );
+
+    QVERIFY(reply.isValid());
+    QCOMPARE(reply.value(), qint64(54321));
+
+    bool foundBindPaths = false;
+    for (const auto &inv : m_ops->m_processInvocations) {
+        if (inv.command == QStringLiteral("systemd-run")) {
+            for (const QString &arg : inv.args) {
+                if (arg.contains(QStringLiteral("BindPaths=/overrides/config.ini:/games/config.ini"))) {
+                    foundBindPaths = true;
+                    break;
+                }
+            }
+        }
+    }
+    QVERIFY2(foundBindPaths, "BindPaths property should be set in systemd-run args");
+}
+
+void TestCouchPlayHelper::testLaunchInstance_validationEmptyUsername()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+
+    QDBusReply<qint64> reply = m_dbusInterface->call(
+        QStringLiteral("LaunchInstance"),
+        QString(),
+        1000u,
+        QStringList{},
+        QStringLiteral("steam"),
+        QStringList{},
+        QStringList()
+    );
+
+    QVERIFY(!reply.isValid());
+    QCOMPARE(reply.error().type(), QDBusError::InvalidArgs);
+}
+
+void TestCouchPlayHelper::testLaunchInstance_validationNonexistentUser()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+
+    QDBusReply<qint64> reply = m_dbusInterface->call(
+        QStringLiteral("LaunchInstance"),
+        QStringLiteral("nonexistent"),
+        1000u,
+        QStringList{},
+        QStringLiteral("steam"),
+        QStringList{},
+        QStringList{}
+    );
+
+    QVERIFY(!reply.isValid());
+    QCOMPARE(reply.error().type(), QDBusError::InvalidArgs);
+}
+
+void TestCouchPlayHelper::testStopInstance_serviceStop()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+    m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
+    m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001);
+    m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000, QStringLiteral("/home/compositor"));
+    m_ops->setFileExists(QStringLiteral("/run/user/1000"), true);
+    m_ops->setFileExists(QStringLiteral("/run/user/1000/wayland-0"), true);
+    m_ops->setProcessExitCode(0);
+    m_ops->setMockProcessStart(true);
+    m_ops->setStandardOutput(QByteArray("99999\n"));
+
+    QDBusReply<qint64> launchReply = m_dbusInterface->call(
+        QStringLiteral("LaunchInstance"),
+        QStringLiteral("player1"),
+        1000u,
+        QStringList{},
+        QStringLiteral("steam"),
+        QStringList{},
+        QStringList{}
+    );
+    QVERIFY(launchReply.isValid());
+    qint64 pid = launchReply.value();
+    QVERIFY(pid > 0);
+
+    m_ops->m_processInvocations.clear();
+
+    QDBusReply<bool> stopReply = m_dbusInterface->call(
+        QStringLiteral("StopInstance"),
+        pid
+    );
+
+    QVERIFY(stopReply.isValid());
+    QVERIFY(stopReply.value());
+
+    bool foundStop = false;
+    bool foundResetFailed = false;
+    for (const auto &inv : m_ops->m_processInvocations) {
+        if (inv.command == QStringLiteral("systemctl")
+            && inv.args.contains(QStringLiteral("stop"))
+            && inv.args.contains(QStringLiteral("couchplay-player1.service"))) {
+            foundStop = true;
+        }
+        if (inv.command == QStringLiteral("systemctl")
+            && inv.args.contains(QStringLiteral("reset-failed"))
+            && inv.args.contains(QStringLiteral("couchplay-player1.service"))) {
+            foundResetFailed = true;
+        }
+    }
+    QVERIFY2(foundStop, "systemctl stop should be called for the service");
+    QVERIFY2(foundResetFailed, "systemctl reset-failed should be called after stop");
+}
+
+void TestCouchPlayHelper::testKillInstance_serviceKill()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+    m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
+    m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001);
+    m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000, QStringLiteral("/home/compositor"));
+    m_ops->setFileExists(QStringLiteral("/run/user/1000"), true);
+    m_ops->setFileExists(QStringLiteral("/run/user/1000/wayland-0"), true);
+    m_ops->setProcessExitCode(0);
+    m_ops->setMockProcessStart(true);
+    m_ops->setStandardOutput(QByteArray("77777\n"));
+
+    QDBusReply<qint64> launchReply = m_dbusInterface->call(
+        QStringLiteral("LaunchInstance"),
+        QStringLiteral("player1"),
+        1000u,
+        QStringList{},
+        QStringLiteral("steam"),
+        QStringList{},
+        QStringList{}
+    );
+    QVERIFY(launchReply.isValid());
+    qint64 pid = launchReply.value();
+    QVERIFY(pid > 0);
+
+    m_ops->m_processInvocations.clear();
+
+    QDBusReply<bool> killReply = m_dbusInterface->call(
+        QStringLiteral("KillInstance"),
+        pid
+    );
+
+    QVERIFY(killReply.isValid());
+    QVERIFY(killReply.value());
+
+    bool foundSigkill = false;
+    for (const auto &inv : m_ops->m_processInvocations) {
+        if (inv.command == QStringLiteral("systemctl")
+            && inv.args.contains(QStringLiteral("kill"))
+            && inv.args.contains(QStringLiteral("--signal=SIGKILL"))
+            && inv.args.contains(QStringLiteral("couchplay-player1.service"))) {
+            foundSigkill = true;
+        }
+    }
+    QVERIFY2(foundSigkill, "systemctl kill --signal=SIGKILL should be called");
+}
+
+void TestCouchPlayHelper::testStopInstance_fallbackToDirectKill()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+    m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
+    m_ops->setProcessExitCode(0);
+    m_ops->setMockProcessStart(true);
+
+    QDBusReply<bool> reply = m_dbusInterface->call(
+        QStringLiteral("StopInstance"),
+        qint64(99999)
+    );
+
+    QVERIFY(reply.isValid());
+    QVERIFY(reply.value());
+}
+
+void TestCouchPlayHelper::testLaunchInstance_staleUnitRecovery()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+    m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
+    m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001);
+    m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000, QStringLiteral("/home/compositor"));
+    m_ops->setFileExists(QStringLiteral("/run/user/1000"), true);
+    m_ops->setFileExists(QStringLiteral("/run/user/1000/wayland-0"), true);
+
+    m_ops->setProcessExitCode(1);
+    m_ops->setMockProcessStart(true);
+    m_ops->setStandardError(QByteArray("Unit couchplay-player1.service already loaded"));
+    m_ops->setStandardOutput(QByteArray(""));
+
+    QDBusReply<qint64> reply = m_dbusInterface->call(
+        QStringLiteral("LaunchInstance"),
+        QStringLiteral("player1"),
+        1000u,
+        QStringList{},
+        QStringLiteral("steam"),
+        QStringList{},
+        QStringList{}
+    );
+
+    QVERIFY(!reply.isValid());
+    QCOMPARE(reply.error().type(), QDBusError::Failed);
+
+    int systemdRunCount = 0;
+    bool foundEnvEFlag = false;
+    bool foundStop = false;
+    bool foundResetFailed = false;
+    for (const auto &inv : m_ops->m_processInvocations) {
+        if (inv.command == QStringLiteral("systemd-run")) {
+            systemdRunCount++;
+            if (inv.args.contains(QStringLiteral("-E"))) {
+                foundEnvEFlag = true;
+            }
+        }
+        if (inv.command == QStringLiteral("systemctl")) {
+            if (inv.args.contains(QStringLiteral("stop"))) {
+                foundStop = true;
+            }
+            if (inv.args.contains(QStringLiteral("reset-failed"))) {
+                foundResetFailed = true;
+            }
+        }
+    }
+    QVERIFY2(foundStop, "systemctl stop should be called during stale unit recovery");
+    QVERIFY2(foundResetFailed, "systemctl reset-failed should be called during stale unit recovery");
+    QVERIFY2(systemdRunCount >= 2, "systemd-run should be called at least twice (initial + retry)");
+    QVERIFY2(foundEnvEFlag, "-E flag should be used for environment variables");
 }
 
 QTEST_MAIN(TestCouchPlayHelper)

@@ -14,17 +14,15 @@ Kirigami.ScrollablePage {
 
     title: i18nc("@title", "Home")
 
-    // Backend managers (from Main.qml)
     required property var sessionManager
     required property var sessionRunner
     required property var deviceManager
     required property var helperClient
 
-    // Computed properties to avoid repeating conditions
+    // Computed properties
     property bool helperAvailable: helperClient?.available ?? false
     property bool hasControllers: deviceManager && deviceManager.controllers.length > 0
 
-    // Refresh on page load
     Component.onCompleted: {
         if (sessionManager) {
             sessionManager.refreshProfiles()
@@ -61,7 +59,6 @@ Kirigami.ScrollablePage {
                     }
                 }
 
-                // Session status indicator
                 Kirigami.Chip {
                     visible: sessionRunner?.running ?? false
                     text: i18nc("@info", "%1 instances running", sessionRunner ? sessionRunner.runningInstanceCount : 0)
@@ -76,7 +73,6 @@ Kirigami.ScrollablePage {
     ColumnLayout {
         spacing: Kirigami.Units.largeSpacing
 
-        // Active session banner
         Kirigami.InlineMessage {
             Layout.fillWidth: true
             visible: sessionRunner?.running ?? false
@@ -97,7 +93,6 @@ Kirigami.ScrollablePage {
             ]
         }
 
-        // Quick Actions
         Kirigami.Heading {
             text: i18nc("@title", "Quick Actions")
             level: 2
@@ -117,7 +112,9 @@ Kirigami.ScrollablePage {
                     if (sessionManager) {
                         sessionManager.newSession()
                     }
-                    applicationWindow().pageStack.clear()
+                    if (deviceManager) {
+                        deviceManager.unassignAll()
+                    }
                     applicationWindow().pushSessionSetupPage()
                 }
             }
@@ -130,33 +127,17 @@ Kirigami.ScrollablePage {
                 description: i18nc("@info", "Launch a saved session profile")
                 badgeCount: sessionManager ? sessionManager.savedProfiles.length : 0
                 onClicked: {
-                    applicationWindow().pageStack.clear()
                     applicationWindow().pushProfilesPage()
-                }
-            }
-
-            Components.ActionCard {
-                Layout.fillWidth: true
-                Layout.preferredHeight: Kirigami.Units.gridUnit * 8
-                iconName: "input-gamepad"
-                title: i18nc("@action", "Manage Devices")
-                description: i18nc("@info", "View and configure input devices")
-                badgeCount: deviceManager ? deviceManager.controllers.length : 0
-                onClicked: {
-                    applicationWindow().pageStack.clear()
-                    applicationWindow().pushDeviceAssignmentPage()
                 }
             }
         }
 
-        // Recent Profiles
         Kirigami.Heading {
             text: i18nc("@title", "Recent Profiles")
             level: 2
             Layout.topMargin: Kirigami.Units.largeSpacing
         }
 
-        // Show recent profiles or placeholder
         GridLayout {
             Layout.fillWidth: true
             columns: Math.max(1, Math.floor(root.width / (Kirigami.Units.gridUnit * 16)))
@@ -165,7 +146,6 @@ Kirigami.ScrollablePage {
             visible: (sessionManager?.savedProfiles?.length ?? 0) > 0
 
             Repeater {
-                // Show up to 4 recent profiles
                 model: sessionManager ? sessionManager.savedProfiles.slice(0, 4) : []
 
                 delegate: Kirigami.AbstractCard {
@@ -225,7 +205,6 @@ Kirigami.ScrollablePage {
             }
         }
 
-        // Empty state for profiles
         Kirigami.PlaceholderMessage {
             visible: !sessionManager || sessionManager.savedProfiles.length === 0
             text: i18nc("@info", "No profiles yet")
@@ -237,25 +216,21 @@ Kirigami.ScrollablePage {
                 icon.name: "list-add"
                 text: i18nc("@action:button", "Create New Session")
                 onTriggered: {
-                    applicationWindow().pageStack.clear()
                     applicationWindow().pushSessionSetupPage()
                 }
             }
         }
 
-        // View all profiles link
         Controls.Button {
             visible: (sessionManager?.savedProfiles?.length ?? 0) > 4
             text: i18nc("@action:button", "View all %1 profiles...", sessionManager ? sessionManager.savedProfiles.length : 0)
             flat: true
             Layout.alignment: Qt.AlignRight
             onClicked: {
-                applicationWindow().pageStack.clear()
                 applicationWindow().pushProfilesPage()
             }
         }
 
-        // System Status
         Kirigami.Heading {
             text: i18nc("@title", "System Status")
             level: 2
@@ -345,7 +320,6 @@ Kirigami.ScrollablePage {
         }
     }
 
-    // System check properties - check if executables exist in PATH
     property bool gamescopeAvailable: Platform.StandardPaths.findExecutable("gamescope") !== ""
     property bool steamAvailable: Platform.StandardPaths.findExecutable("steam") !== ""
 }

@@ -13,36 +13,28 @@ Kirigami.ScrollablePage {
     id: root
     title: i18nc("@title", "Settings")
 
-    // Reference to session runner for settings that affect it
     property var sessionRunner: null
 
-    // Reference to helper client for status display
     required property var helperClient
 
-    // Computed property to avoid repeating condition
     property bool helperAvailable: helperClient?.available ?? false
 
-    // Reference to preset manager (optional, will use internal if not provided)
     property var presetManager: null
 
-    // Reference to steam config manager for shortcut sync
     property var steamConfigManager: null
 
-    // Reference to settings manager for persisted settings
     property var settingsManager: null
 
-    // Reference to heroic config manager for Heroic detection
     property var heroicConfigManager: null
 
-    // Internal preset manager if not provided externally
+    property var audioManager: null
+
     PresetManager {
         id: internalPresetManager
     }
 
-    // Use provided preset manager or internal one
     readonly property var activePresetManager: root.presetManager ?? internalPresetManager
 
-    // Settings convenience properties (bound to SettingsManager)
     readonly property bool hidePanels: settingsManager?.hidePanels ?? true
     readonly property bool killSteam: settingsManager?.killSteam ?? true
     readonly property bool restoreSession: settingsManager?.restoreSession ?? false
@@ -62,7 +54,6 @@ Kirigami.ScrollablePage {
     ColumnLayout {
         spacing: Kirigami.Units.mediumSpacing
 
-        // General Settings Section
         Kirigami.FormLayout {
             Layout.alignment: Qt.AlignLeft | Qt.AlignTop
             wideMode: root.width > Kirigami.Units.gridUnit * 30
@@ -106,7 +97,6 @@ Kirigami.ScrollablePage {
             }
         }
 
-        // Gamescope Settings Section
         Kirigami.FormLayout {
             Layout.alignment: Qt.AlignLeft | Qt.AlignTop
             wideMode: root.width > Kirigami.Units.gridUnit * 30
@@ -173,7 +163,6 @@ Kirigami.ScrollablePage {
                 Controls.ToolTip.delay: 1000
             }
         }
-        // Launch Presets Section
         Kirigami.FormLayout {
             Layout.alignment: Qt.AlignLeft | Qt.AlignTop
             wideMode: root.width > Kirigami.Units.gridUnit * 30
@@ -183,7 +172,6 @@ Kirigami.ScrollablePage {
                 Kirigami.FormData.label: i18nc("@title:group", "Launch Presets")
             }
 
-            // List of current presets and add button
             ColumnLayout {
                 Kirigami.FormData.label: i18nc("@label", "Presets")
                 Layout.fillWidth: true
@@ -254,7 +242,6 @@ Kirigami.ScrollablePage {
                     }
                 }
 
-                // Add preset button
                 Controls.Button {
                     text: i18nc("@action:button", "Add from Application...")
                     icon.name: "list-add"
@@ -265,7 +252,6 @@ Kirigami.ScrollablePage {
                 }
             }
         }
-        // Ignored Devices Section
         Kirigami.FormLayout {
             Layout.alignment: Qt.AlignLeft | Qt.AlignTop
             wideMode: root.width > Kirigami.Units.gridUnit * 30
@@ -276,7 +262,6 @@ Kirigami.ScrollablePage {
                 Kirigami.FormData.label: i18nc("@title:group", "Ignored Devices")
             }
 
-            // List of ignored devices
             ColumnLayout {
                 Kirigami.FormData.label: i18nc("@label", "Devices")
                 Layout.fillWidth: true
@@ -319,8 +304,6 @@ Kirigami.ScrollablePage {
                 }
             }
         }
-
-        // Steam Integration Section
         Kirigami.FormLayout {
             Layout.alignment: Qt.AlignLeft | Qt.AlignTop
             wideMode: root.width > Kirigami.Units.gridUnit * 30
@@ -378,7 +361,6 @@ Kirigami.ScrollablePage {
             }
         }
 
-        // Heroic Games Launcher Section
         Kirigami.FormLayout {
             Layout.alignment: Qt.AlignLeft | Qt.AlignTop
             wideMode: root.width > Kirigami.Units.gridUnit * 30
@@ -452,7 +434,6 @@ Kirigami.ScrollablePage {
             }
         }
 
-        // Game launcher info message
         Kirigami.InlineMessage {
             Layout.fillWidth: true
             visible: (root.steamConfigManager !== null && root.steamConfigManager.steamDetected) 
@@ -462,7 +443,6 @@ Kirigami.ScrollablePage {
         }
 
 
-        // Audio Section
         Kirigami.FormLayout {
             Layout.alignment: Qt.AlignLeft | Qt.AlignTop
             wideMode: root.width > Kirigami.Units.gridUnit * 30
@@ -477,26 +457,47 @@ Kirigami.ScrollablePage {
                 spacing: Kirigami.Units.smallSpacing
 
                 Kirigami.Icon {
-                    source: "dialog-ok-apply"
-                    color: Kirigami.Theme.positiveTextColor
+                    source: root.audioManager && root.audioManager.audioServer !== "" ? "dialog-ok-apply" : "dialog-error"
+                    color: root.audioManager && root.audioManager.audioServer !== "" ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.negativeTextColor
                     Layout.preferredWidth: Kirigami.Units.iconSizes.small
                     Layout.preferredHeight: Kirigami.Units.iconSizes.small
                 }
 
                 Controls.Label {
-                    text: "PipeWire"
+                    text: root.audioManager && root.audioManager.audioServer !== ""
+                          ? root.audioManager.audioServer
+                          : i18nc("@info", "Not detected")
+                    color: root.audioManager && root.audioManager.audioServer !== ""
+                           ? Kirigami.Theme.positiveTextColor
+                           : Kirigami.Theme.negativeTextColor
                 }
             }
 
             Controls.Label {
                 Kirigami.FormData.label: i18nc("@label", "Multi-user routing")
-                text: i18nc("@info", "Audio from secondary users is routed via PipeWire TCP")
+                text: {
+                    if (!root.audioManager || root.audioManager.audioServer === "") {
+                        return i18nc("@info", "Not available — no audio server detected")
+                    }
+                    if (root.audioManager.multiUserConfigured) {
+                        return i18nc("@info", "Ready — socket ACLs configured")
+                    }
+                    return i18nc("@info", "Will be configured automatically at session start")
+                }
                 wrapMode: Text.WordWrap
                 opacity: 0.7
+                color: {
+                    if (!root.audioManager || root.audioManager.audioServer === "") {
+                        return Kirigami.Theme.negativeTextColor
+                    }
+                    if (root.audioManager.multiUserConfigured) {
+                        return Kirigami.Theme.positiveTextColor
+                    }
+                    return Kirigami.Theme.textColor
+                }
             }
         }
 
-        // Privileged Helper Section
         Kirigami.FormLayout {
             Layout.alignment: Qt.AlignLeft | Qt.AlignTop
             wideMode: root.width > Kirigami.Units.gridUnit * 30
@@ -531,7 +532,6 @@ Kirigami.ScrollablePage {
             }
         }
 
-        // Keyboard Shortcuts Section
         Kirigami.FormLayout {
             Layout.alignment: Qt.AlignLeft | Qt.AlignTop
             wideMode: root.width > Kirigami.Units.gridUnit * 30
@@ -567,7 +567,6 @@ Kirigami.ScrollablePage {
             }
         }
 
-        // Helper info card
         Kirigami.InlineMessage {
             Layout.fillWidth: true
             text: i18nc("@info", "The CouchPlay Helper is a privileged system service required for creating users and managing device permissions. It uses PolicyKit for secure authorization.")
@@ -583,7 +582,6 @@ Kirigami.ScrollablePage {
             ]
         }
 
-        // About Section
         Kirigami.FormLayout {
             Layout.alignment: Qt.AlignLeft | Qt.AlignTop
             wideMode: root.width > Kirigami.Units.gridUnit * 30
@@ -631,8 +629,7 @@ Kirigami.ScrollablePage {
             }
         }
 
-        // System Requirements Card
-        Kirigami.Card {
+        Kirigami.AbstractCard {
             Layout.fillWidth: true
             Layout.bottomMargin: Kirigami.Units.largeSpacing
 
@@ -647,7 +644,6 @@ Kirigami.ScrollablePage {
                 columnSpacing: Kirigami.Units.largeSpacing
                 rowSpacing: Kirigami.Units.smallSpacing
 
-                // Gamescope - Required
                 RowLayout {
                     spacing: Kirigami.Units.smallSpacing
                     Kirigami.Icon {
@@ -667,7 +663,6 @@ Kirigami.ScrollablePage {
                     Layout.fillWidth: true
                 }
 
-                // PipeWire - Required
                 RowLayout {
                     spacing: Kirigami.Units.smallSpacing
                     Kirigami.Icon {
@@ -687,7 +682,6 @@ Kirigami.ScrollablePage {
                     Layout.fillWidth: true
                 }
 
-                // KDE Plasma - Recommended
                 RowLayout {
                     spacing: Kirigami.Units.smallSpacing
                     Kirigami.Icon {
@@ -705,7 +699,6 @@ Kirigami.ScrollablePage {
                     Layout.fillWidth: true
                 }
 
-                // Steam - Optional
                 RowLayout {
                     spacing: Kirigami.Units.smallSpacing
                     Kirigami.Icon {
@@ -726,7 +719,6 @@ Kirigami.ScrollablePage {
         }
     }
 
-    // Dialog components (extracted to separate files)
     Dialogs.ResetSettingsDialog {
         id: resetConfirmDialog
         settingsManager: root.settingsManager

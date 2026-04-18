@@ -57,6 +57,7 @@ public:
     virtual bool waitForFinished(QProcess *process, int msecs) = 0;
     virtual int processExitCode(QProcess *process) = 0;
     virtual QByteArray readStandardError(QProcess *process) = 0;
+    virtual QByteArray readAllStandardOutput(QProcess *process) = 0;
 
     // Directory listing
     virtual QStringList entryList(const QString &path, const QStringList &nameFilters, QDir::Filters filters) = 0;
@@ -78,12 +79,10 @@ class RealSystemOps : public QObject, public SystemOps
 public:
     explicit RealSystemOps(QObject *parent = nullptr);
 
-    // User/group lookup operations
     struct passwd *getpwnam(const char *name) override;
     struct passwd *getpwuid(uid_t uid) override;
     struct group *getgrnam(const char *name) override;
 
-    // Filesystem operations
     bool fileExists(const QString &path) override;
     bool isDirectory(const QString &path) override;
     bool mkpath(const QString &path) override;
@@ -91,27 +90,22 @@ public:
     bool copyFile(const QString &source, const QString &dest) override;
     bool writeFile(const QString &path, const QByteArray &content) override;
 
-    // Device path validation
     bool statPath(const QString &path, struct stat *buf) override;
     bool isCharDevice(mode_t mode) override;
 
-    // Ownership and permissions
     int chown(const QString &path, uid_t owner, gid_t group) override;
     int chmod(const QString &path, mode_t mode) override;
 
-    // Process operations
     QProcess *createProcess(QObject *parent = nullptr) override;
     void startProcess(QProcess *process, const QString &program, const QStringList &arguments) override;
     bool waitForFinished(QProcess *process, int msecs) override;
     int processExitCode(QProcess *process) override;
     QByteArray readStandardError(QProcess *process) override;
+    QByteArray readAllStandardOutput(QProcess *process) override;
 
-    // Directory listing
     QStringList entryList(const QString &path, const QStringList &nameFilters, QDir::Filters filters) override;
 
-    // Process signaling
     bool killProcess(pid_t pid, int signal) override;
 
-    // Authorization check
     bool checkAuthorization(const QString &action) override;
 };

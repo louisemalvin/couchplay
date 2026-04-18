@@ -13,12 +13,6 @@
 #include "HeroicConfigManager.h"
 #include "SteamConfigManager.h"
 
-/**
- * LauncherInfo - Launcher-specific configuration and paths
- * 
- * Associates a launcher with its config paths, game directories,
- * and capabilities (ACL requirements, shortcut sync support).
- */
 struct LauncherInfo {
     Q_GADGET
     Q_PROPERTY(QString configPath MEMBER configPath)
@@ -28,11 +22,11 @@ struct LauncherInfo {
     Q_PROPERTY(bool hasShortcutSync MEMBER hasShortcutSync)
 
 public:
-    QString configPath;           // Main config directory
-    QString dataPath;             // Game data/library path
+    QString configPath;
+    QString dataPath;
     QStringList gameDirectories;  // Paths needing ACLs (computed at runtime)
-    bool requiresAcls = false;    // Does this launcher need ACL setup?
-    bool hasShortcutSync = false; // Can we sync shortcuts from this launcher?
+    bool requiresAcls = false;
+    bool hasShortcutSync = false;
     
     bool operator==(const LauncherInfo &other) const {
         return configPath == other.configPath && 
@@ -44,16 +38,6 @@ public:
 
 Q_DECLARE_METATYPE(LauncherInfo)
 
-/**
- * @brief A launch preset defining how to start a game/application
- * 
- * Presets can be builtin (Steam, Heroic, Lutris) or custom (from .desktop files
- * or user-defined). Each preset specifies the command to run, optional
- * working directory, and whether Steam integration (-e flag) is enabled.
- * 
- * Launcher-aware presets include a launcherId and LauncherInfo with associated
- * config paths and directories that need ACL setup.
- */
 struct LaunchPreset {
     Q_GADGET
     Q_PROPERTY(QString id MEMBER id)
@@ -70,16 +54,15 @@ struct LaunchPreset {
     Q_PROPERTY(QStringList sharedDirectories MEMBER sharedDirectories)
 
 public:
-    QString id;                     // Unique ID (e.g., "steam", "heroic", "lutris", "custom-abc123")
-    QString name;                   // Display name
-    QString command;                // Launch command
-    QString workingDirectory;       // Optional working dir (from .desktop Path=)
-    QString iconName;               // Icon name for UI
+    QString id;                     // e.g., "steam", "heroic", "lutris", "custom-abc123"
+    QString name;
+    QString command;
+    QString workingDirectory;       // Optional, from .desktop Path=
+    QString iconName;
     QString desktopFilePath;        // Source .desktop file (if applicable)
     bool isBuiltin = false;         // true for Steam/Heroic/Lutris
     bool steamIntegration = false;  // Enable gamescope -e flag
     
-    // Launcher-aware fields
     QString launcherId;             // "steam", "heroic", "lutris", "custom" (empty for non-launcher presets)
     LauncherInfo launcherInfo;      // Populated by detection for launcher presets
     QStringList sharedDirectories;  // Per-preset shared directories for ACL/mount setup
@@ -94,7 +77,7 @@ Q_DECLARE_METATYPE(LaunchPreset)
  * 
  * Provides builtin presets (Steam, Lutris), discovery of installed
  * applications via .desktop files, and custom preset management.
- * Custom presets are persisted to ~/.config/couchplay/presets.json.
+ * Custom presets are persisted to ~/.config/couchplayrc as KConfig groups.
  */
 class PresetManager : public QObject
 {
@@ -107,94 +90,33 @@ public:
     explicit PresetManager(QObject *parent = nullptr);
     ~PresetManager() override;
 
-    /**
-     * @brief Set the HeroicConfigManager for Heroic integration
-     */
     Q_INVOKABLE void setHeroicConfigManager(HeroicConfigManager *manager);
-    
-    /**
-     * @brief Get the HeroicConfigManager
-     */
     HeroicConfigManager *heroicConfigManager() const { return m_heroicConfigManager; }
 
-    /**
-     * @brief Set the SteamConfigManager for Steam library detection
-     */
     Q_INVOKABLE void setSteamConfigManager(SteamConfigManager *manager);
-
-    /**
-     * @brief Get the SteamConfigManager
-     */
     SteamConfigManager *steamConfigManager() const { return m_steamConfigManager; }
 
-    /**
-     * @brief Get all available presets (builtin + custom)
-     */
     QList<LaunchPreset> presets() const;
     QVariantList presetsAsVariant() const;
 
     /**
-     * @brief Get applications discovered from .desktop files
-     * These are potential presets that can be added as custom presets
+     * @brief Applications discovered from .desktop files, available as potential custom presets
      */
     QList<LaunchPreset> availableApplications() const { return m_availableApplications; }
     QVariantList availableApplicationsAsVariant() const;
 
-    /**
-     * @brief Get a preset by ID
-     * @param id Preset ID
-     * @return The preset, or an empty preset if not found
-     */
     Q_INVOKABLE LaunchPreset getPreset(const QString &id) const;
-
-    /**
-     * @brief Get the command for a preset
-     * @param id Preset ID
-     * @return The command string, or empty if not found
-     */
     Q_INVOKABLE QString getCommand(const QString &id) const;
-
-    /**
-     * @brief Get the working directory for a preset
-     * @param id Preset ID
-     * @return The working directory, or empty if not specified
-     */
     Q_INVOKABLE QString getWorkingDirectory(const QString &id) const;
-
-    /**
-     * @brief Check if a preset has Steam integration enabled
-     * @param id Preset ID
-     * @return true if Steam integration is enabled
-     */
     Q_INVOKABLE bool getSteamIntegration(const QString &id) const;
-
-    /**
-     * @brief Get launcher ID for a preset
-     * @param id Preset ID
-     * @return Launcher ID ("steam", "heroic", "lutris", "custom", or empty)
-     */
     Q_INVOKABLE QString getLauncherId(const QString &id) const;
 
     /**
      * @brief Get game directories for a launcher preset (for ACL setup)
-     * @param id Preset ID
-     * @return List of directories that need ACLs
      */
     Q_INVOKABLE QStringList getGameDirectories(const QString &id) const;
 
-    /**
-     * @brief Get shared directories for a preset
-     * @param id Preset ID
-     * @return List of absolute paths to shared directories
-     */
     Q_INVOKABLE QStringList getSharedDirectories(const QString &id) const;
-
-    /**
-     * @brief Set shared directories for a preset
-     * @param id Preset ID
-     * @param directories List of absolute paths
-     * @return true if updated successfully
-     */
     Q_INVOKABLE bool setSharedDirectories(const QString &id, const QStringList &directories);
 
     /**
@@ -279,12 +201,7 @@ private:
      */
     LaunchPreset parseDesktopFile(const QString &filePath) const;
 
-    /**
-     * @brief Generate a unique ID for a custom preset
-     */
     static QString generateCustomId();
-
-    QString configFilePath() const;
 
     /**
      * @brief Get default shared directories for a built-in preset
