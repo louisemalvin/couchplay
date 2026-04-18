@@ -64,6 +64,18 @@
   </screenshots>
   
   <releases>
+    <release version="0.3.0" date="2026-04-18">
+      <description>
+        <p>New features and improvements</p>
+        <ul>
+          <li>Add grid sub-layouts for 3 players</li>
+          <li>Sequential instance launching for better resource management</li>
+          <li>Screensaver inhibition during active sessions</li>
+          <li>Replace machinectl with systemd-run transient units</li>
+          <li>Improved page navigation and audio routing</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2025-01-03">
       <description>
         <p>Initial release</p>
