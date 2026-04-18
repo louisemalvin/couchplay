@@ -16,6 +16,10 @@ target_link_libraries(couchplay-helper PRIVATE
     Qt6::DBus
 )
 
+target_include_directories(couchplay-helper PRIVATE
+    ${PROJECT_BINARY_DIR}
+)
+
 # Install to libexec
 install(TARGETS couchplay-helper
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}

@@ -153,13 +153,6 @@ public Q_SLOTS:
     int ResetAllDevices();
 
     /**
-     * Get version of the helper daemon
-     *
-     * @return Version string
-     */
-    QString Version();
-
-    /**
      * Launch a gamescope instance as a specified user via systemd-run
      *
      * This method handles all the complexity of running gamescope as any user:

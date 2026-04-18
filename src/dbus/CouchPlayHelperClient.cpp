@@ -31,14 +31,8 @@ CouchPlayHelperClient::CouchPlayHelperClient(QObject *parent)
         return;
     }
 
-    QDBusReply<QString> reply = m_interface->call(QStringLiteral("Version"));
-    if (reply.isValid()) {
-        qWarning() << "CouchPlay helper connected, version:" << reply.value();
-        m_available = true;
-    } else {
-        qWarning() << "CouchPlay helper call failed:" << reply.error().message();
-        m_available = false;
-    }
+    qWarning() << "CouchPlay helper connected";
+    m_available = true;
 
     QDBusConnection::systemBus().connect(
         SERVICE_NAME,
