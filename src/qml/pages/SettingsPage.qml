@@ -598,7 +598,7 @@ Kirigami.ScrollablePage {
 
             Controls.Label {
                 Kirigami.FormData.label: i18nc("@label", "Version")
-                text: "0.1.0-dev"
+                text: Qt.application.version
             }
 
             Controls.Label {

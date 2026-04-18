@@ -287,6 +287,52 @@ install_binary() {
     return 0
 }
 
+install_data() {
+    # Installs desktop file, icon, and metainfo for desktop integration
+    local extract_dir="$1"
+    
+    # Find the extracted directory containing data/
+    local data_dir
+    data_dir=$(find "$extract_dir" -type d -name "data" | head -1)
+    
+    if [[ -z "$data_dir" ]]; then
+        print_warn "Could not find data/ directory in extracted tarball — skipping desktop integration"
+        return 0
+    fi
+    
+    # Install desktop file
+    local desktop_src="${data_dir}/io.github.hikaps.couchplay.desktop"
+    if [[ -f "$desktop_src" ]]; then
+        print_info "Installing desktop file..."
+        install -Dm644 "$desktop_src" "${PREFIX}/share/applications/io.github.hikaps.couchplay.desktop"
+    fi
+    
+    # Install icon
+    local icon_src="${data_dir}/icons/io.github.hikaps.couchplay.png"
+    if [[ -f "$icon_src" ]]; then
+        print_info "Installing icon..."
+        install -Dm644 "$icon_src" "${PREFIX}/share/icons/hicolor/512x512/apps/io.github.hikaps.couchplay.png"
+    fi
+    
+    # Install metainfo
+    local metainfo_src="${data_dir}/io.github.hikaps.couchplay.metainfo.xml"
+    if [[ -f "$metainfo_src" ]]; then
+        print_info "Installing metainfo..."
+        install -Dm644 "$metainfo_src" "${PREFIX}/share/metainfo/io.github.hikaps.couchplay.metainfo.xml"
+    fi
+    
+    # Update icon cache and desktop database (non-fatal)
+    if command -v gtk-update-icon-cache &>/dev/null; then
+        gtk-update-icon-cache -f -t "${PREFIX}/share/icons/hicolor" 2>/dev/null || true
+    fi
+    if command -v update-desktop-database &>/dev/null; then
+        update-desktop-database "${PREFIX}/share/applications" 2>/dev/null || true
+    fi
+    
+    print_info "Desktop integration installed successfully"
+    return 0
+}
+
 install_helper() {
     # Runs the install-helper.sh script from the extracted release directory
     # This installs the privileged helper service, D-Bus config, and polkit policy
@@ -412,7 +458,13 @@ main() {
     if ! install_binary "$extract_dir"; then
         exit 1
     fi
-    
+
+    # Install desktop file, icon, and metainfo
+    echo ""
+    if ! install_data "$extract_dir"; then
+        exit 1
+    fi
+
     # Install helper service (D-Bus, polkit, etc.)
     echo ""
     if ! install_helper "$extract_dir"; then
