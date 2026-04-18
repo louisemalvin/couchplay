@@ -134,8 +134,6 @@ private:
 
 static const QRegularExpression s_validUsername(QStringLiteral("^[a-z][a-z0-9_-]{0,31}$"));
 
-static const QString HELPER_VERSION = QStringLiteral("0.2.0");
-
 static const QString ACTION_DEVICE_OWNER = QStringLiteral("io.github.hikaps.couchplay.change-device-owner");
 static const QString ACTION_CREATE_USER = QStringLiteral("io.github.hikaps.couchplay.create-user");
 static const QString ACTION_DELETE_USER = QStringLiteral("io.github.hikaps.couchplay.delete-user");
@@ -704,11 +702,6 @@ void CouchPlayHelper::removeRuntimeAcls(const QString &runtimeDir)
 
     removeAcl(runtimeDir + QStringLiteral("/wayland-0"));
     removeAcl(runtimeDir);
-}
-
-QString CouchPlayHelper::Version()
-{
-    return HELPER_VERSION;
 }
 
 bool CouchPlayHelper::checkAuthorization(const QString &action)

@@ -11,6 +11,8 @@
 #include <KLocalizedString>
 #include <KIconTheme>
 
+#include "couchplay-version.h"
+
 #include "core/DeviceManager.h"
 #include "core/SessionManager.h"
 #include "core/SessionRunner.h"
@@ -51,7 +53,7 @@ int main(int argc, char *argv[])
     QApplication::setOrganizationName(QStringLiteral("hikaps"));
     QApplication::setOrganizationDomain(QStringLiteral("github.com/hikaps"));
     QApplication::setApplicationName(QStringLiteral("CouchPlay"));
-    QApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QApplication::setApplicationVersion(QStringLiteral(COUCHPLAY_VERSION_STRING));
     QApplication::setDesktopFileName(QStringLiteral("io.github.hikaps.couchplay"));
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("io.github.hikaps.couchplay")));
 

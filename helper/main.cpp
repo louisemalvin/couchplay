@@ -3,6 +3,8 @@
 
 #include "CouchPlayHelper.h"
 
+#include "couchplay-version.h"
+
 #include <QCoreApplication>
 #include <QDBusConnection>
 #include <QDBusError>
@@ -12,7 +14,7 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("couchplay-helper"));
-    app.setApplicationVersion(QStringLiteral("0.2.0"));
+    app.setApplicationVersion(QStringLiteral(COUCHPLAY_VERSION_STRING));
     app.setOrganizationDomain(QStringLiteral("io.github.hikaps"));
 
     // Create the helper service
