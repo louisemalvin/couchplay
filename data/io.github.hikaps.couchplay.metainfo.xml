@@ -64,6 +64,16 @@
   </screenshots>
   
   <releases>
+    <release version="0.3.1" date="2026-04-18">
+      <description>
+        <p>Bug fix release</p>
+        <ul>
+          <li>Fix version display in settings (was hardcoded)</li>
+          <li>Fix missing app icon when installed via one-liner</li>
+          <li>Remove redundant helper version D-Bus method</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-04-18">
       <description>
         <p>New features and improvements</p>
