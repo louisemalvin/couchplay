@@ -64,6 +64,14 @@
   </screenshots>
   
   <releases>
+    <release version="0.3.2" date="2026-04-20">
+      <description>
+        <p>Bug fix release</p>
+        <ul>
+          <li>Fix cross-user audio routing via PipeWire PulseAudio TCP listener</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-04-18">
       <description>
         <p>Bug fix release</p>

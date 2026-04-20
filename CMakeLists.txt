@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-project(couchplay VERSION 0.3.1 LANGUAGES CXX)
+project(couchplay VERSION 0.3.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -89,6 +89,11 @@ install(FILES data/dbus/io.github.hikaps.CouchPlayHelper.service
 
 install(FILES data/dbus/io.github.hikaps.CouchPlayHelper.conf
     DESTINATION ${CMAKE_INSTALL_PREFIX}/share/dbus-1/system.d
+)
+
+# Install PipeWire PulseAudio config
+install(FILES data/pipewire/50-couchplay.conf
+    DESTINATION ${CMAKE_INSTALL_PREFIX}/share/pipewire/pipewire-pulse.conf.d
 )
 
 # Summary
