@@ -82,6 +82,7 @@ public Q_SLOTS:
 
         m_helper->m_usernameToUnitName.remove(m_username);
         m_helper->m_pidToUsername.remove(m_pid);
+        m_helper->cleanupTcpListenerIfLast(m_username);
 
         m_helper->saveState();
 
@@ -157,6 +158,7 @@ CouchPlayHelper::~CouchPlayHelper()
     for (uint uid : m_runtimeAccessSetForUid) {
         QString runtimeDir = QStringLiteral("/run/user/%1").arg(uid);
         removeRuntimeAcls(runtimeDir);
+        removePulseTcpListener(uid);
         qDebug() << "Cleaned up runtime access for compositor UID" << uid;
     }
     m_runtimeAccessSetForUid.clear();
@@ -637,6 +639,11 @@ bool CouchPlayHelper::SetupRuntimeAccess(uint compositorUid)
     success &= setAcl(pulseDir + QStringLiteral("/native"), QStringLiteral("rw"));
 
     if (success) {
+        // Ensure PipeWire PulseAudio TCP listener is configured for cross-user audio
+        if (!setupPulseTcpListener(compositorUid)) {
+            qWarning() << "Failed to set up PipeWire TCP listener for compositor" << compositorUid;
+            // Not fatal — unix socket ACLs are still set
+        }
         m_runtimeAccessSetForUid.insert(compositorUid);
         saveState();
     }
@@ -655,6 +662,8 @@ bool CouchPlayHelper::RemoveRuntimeAccess(uint compositorUid)
     QString runtimeDir = QStringLiteral("/run/user/%1").arg(compositorUid);
 
     removeRuntimeAcls(runtimeDir);
+
+    removePulseTcpListener(compositorUid);
 
     m_runtimeAccessSetForUid.remove(compositorUid);
     saveState();
@@ -702,6 +711,112 @@ void CouchPlayHelper::removeRuntimeAcls(const QString &runtimeDir)
 
     removeAcl(runtimeDir + QStringLiteral("/wayland-0"));
     removeAcl(runtimeDir);
+}
+
+bool CouchPlayHelper::setupPulseTcpListener(uint compositorUid)
+{
+    struct passwd *pw = m_ops->getpwuid(compositorUid);
+    if (!pw) {
+        qWarning() << "setupPulseTcpListener: compositor user not found for UID" << compositorUid;
+        return false;
+    }
+
+    QString homeDir = QString::fromLocal8Bit(pw->pw_dir);
+    QString confDir = homeDir + QStringLiteral("/.config/pipewire/pipewire-pulse.conf.d");
+    QString confFile = confDir + QStringLiteral("/50-couchplay.conf");
+
+    // Config already exists — assume it's correct
+    if (m_ops->fileExists(confFile)) {
+        return true;
+    }
+
+    qInfo() << "Deploying PipeWire PulseAudio TCP listener config for UID" << compositorUid;
+
+    // Create config directory
+    if (!m_ops->mkpath(confDir)) {
+        qWarning() << "Failed to create PipeWire config directory" << confDir;
+        return false;
+    }
+
+    // Write the drop-in config
+    QByteArray config =
+        "# SPDX-License-Identifier: GPL-3.0-or-later\n"
+        "# SPDX-FileCopyrightText: 2025 CouchPlay Contributors\n"
+        "#\n"
+        "# PipeWire PulseAudio TCP listener for cross-user audio routing.\n"
+        "# Installed by CouchPlay helper. Do not edit.\n"
+        "\n"
+        "pulse.properties = {\n"
+        "    server.address = [\n"
+        "        \"unix:native\"\n"
+        "        \"tcp:127.0.0.1:4713\"\n"
+        "    ]\n"
+        "}\n";
+
+    QFile file(confFile);
+    if (!file.open(QIODevice::WriteOnly)) {
+        qWarning() << "Failed to write PipeWire config" << confFile << ":" << file.errorString();
+        return false;
+    }
+    file.write(config);
+    file.close();
+
+    // Set ownership to compositor user
+    m_ops->chown(confFile, pw->pw_uid, pw->pw_gid);
+
+    // Restart pipewire-pulse to pick up the new config
+    restartUserPipeWirePulse(compositorUid);
+
+    return true;
+}
+
+void CouchPlayHelper::removePulseTcpListener(uint compositorUid)
+{
+    struct passwd *pw = m_ops->getpwuid(compositorUid);
+    if (!pw) {
+        return;
+    }
+
+    QString homeDir = QString::fromLocal8Bit(pw->pw_dir);
+    QString confFile = homeDir + QStringLiteral("/.config/pipewire/pipewire-pulse.conf.d/50-couchplay.conf");
+
+    if (m_ops->fileExists(confFile)) {
+        qInfo() << "Removing PipeWire TCP listener config for UID" << compositorUid;
+        QFile::remove(confFile);
+
+        // Restart pipewire-pulse to revert to defaults
+        restartUserPipeWirePulse(compositorUid);
+    }
+}
+
+void CouchPlayHelper::restartUserPipeWirePulse(uint compositorUid)
+{
+    // Restart pipewire-pulse as the compositor user via machinectl
+    // This is the correct way to run a command in a user's systemd session
+    struct passwd *pw = m_ops->getpwuid(compositorUid);
+    if (!pw) {
+        return;
+    }
+
+    QString username = QString::fromLocal8Bit(pw->pw_name);
+
+    // Use machinectl shell to restart pipewire-pulse in the user's session
+    // This works because linger is enabled for all users
+    QProcess *proc = m_ops->createProcess();
+    m_ops->startProcess(proc, QStringLiteral("machinectl"),
+        {QStringLiteral("shell"), username + QStringLiteral("@"),
+         QStringLiteral("/bin/bash"), QStringLiteral("-c"),
+         QStringLiteral("systemctl --user restart pipewire-pulse")});
+    m_ops->waitForFinished(proc, 10000);
+    if (m_ops->processExitCode(proc) != 0) {
+        qWarning() << "Failed to restart pipewire-pulse for" << username
+                   << ":" << QString::fromLocal8Bit(m_ops->readStandardError(proc));
+    } else {
+        qInfo() << "Restarted pipewire-pulse for" << username;
+        // Give pipewire-pulse a moment to start listening on TCP
+        QThread::msleep(500);
+    }
+    delete proc;
 }
 
 bool CouchPlayHelper::checkAuthorization(const QString &action)
@@ -826,6 +941,7 @@ bool CouchPlayHelper::StopInstance(qint64 pid)
             stopServiceInstance(serviceName);
             m_usernameToUnitName.remove(username);
             m_pidToUsername.remove(pid);
+            cleanupTcpListenerIfLast(username);
             m_stoppingUnits.remove(serviceName);
             saveState();
             return true;
@@ -869,6 +985,7 @@ bool CouchPlayHelper::KillInstance(qint64 pid)
             stopServiceInstance(serviceName);
             m_usernameToUnitName.remove(username);
             m_pidToUsername.remove(pid);
+            cleanupTcpListenerIfLast(username);
             m_stoppingUnits.remove(serviceName);
             saveState();
             return true;
@@ -929,12 +1046,10 @@ qint64 CouchPlayHelper::startTransientUnit(const QString &username, uint composi
     addEnv(QStringLiteral("WAYLAND_DISPLAY=%1/wayland-0").arg(compositorRuntimeDir));
     addEnv(QStringLiteral("XDG_RUNTIME_DIR=/run/user/%1").arg(userUid));
     addEnv(QStringLiteral("PIPEWIRE_RUNTIME_DIR=%1").arg(compositorRuntimeDir));
-    // Only set PULSE_SERVER if socket exists — SDL tries PulseAudio first when set,
-    // and some versions fail to fall back to PipeWire native if socket is missing
-    QString pulseSocket = compositorRuntimeDir + QStringLiteral("/pulse/native");
-    if (m_ops->fileExists(pulseSocket)) {
-        addEnv(QStringLiteral("PULSE_SERVER=unix:%1").arg(pulseSocket));
-    }
+    // Use TCP PulseAudio listener for cross-user audio routing.
+    // The unix socket rejects cross-UID connections, but TCP on localhost works.
+    // The TCP listener is configured by setupPulseTcpListener() during SetupRuntimeAccess().
+    addEnv(QStringLiteral("PULSE_SERVER=tcp:127.0.0.1:4713"));
     for (const QString &var : environment) {
         int eqPos = var.indexOf(QLatin1Char('='));
         if (eqPos > 0) {
@@ -1038,6 +1153,7 @@ qint64 CouchPlayHelper::startTransientUnit(const QString &username, uint composi
 
     m_usernameToUnitName[username] = serviceName;
     m_pidToUsername[mainPid] = username;
+    m_compositorUidForUsername[username] = compositorUid;
 
     saveState();
 
@@ -1045,6 +1161,27 @@ qint64 CouchPlayHelper::startTransientUnit(const QString &username, uint composi
 
     qInfo() << "Started transient unit" << serviceName << "with PID" << mainPid;
     return mainPid;
+}
+
+void CouchPlayHelper::cleanupTcpListenerIfLast(const QString &username)
+{
+    if (!m_compositorUidForUsername.contains(username)) {
+        return;
+    }
+    uint compositorUid = m_compositorUidForUsername.value(username);
+    m_compositorUidForUsername.remove(username);
+
+    bool hasOtherInstances = false;
+    for (auto it = m_compositorUidForUsername.constBegin(); it != m_compositorUidForUsername.constEnd(); ++it) {
+        if (it.value() == compositorUid) {
+            hasOtherInstances = true;
+            break;
+        }
+    }
+
+    if (!hasOtherInstances) {
+        removePulseTcpListener(compositorUid);
+    }
 }
 
 void CouchPlayHelper::stopServiceInstance(const QString &serviceName)
@@ -1655,6 +1792,12 @@ void CouchPlayHelper::saveState()
     }
     root[QStringLiteral("runtimeAccessUids")] = runtimeUids;
 
+    QJsonObject compositorUidObject;
+    for (auto it = m_compositorUidForUsername.constBegin(); it != m_compositorUidForUsername.constEnd(); ++it) {
+        compositorUidObject[it.key()] = static_cast<qint64>(it.value());
+    }
+    root[QStringLiteral("compositorUidForUsername")] = compositorUidObject;
+
     QJsonDocument doc(root);
     QByteArray data = doc.toJson(QJsonDocument::Compact);
 
@@ -1820,6 +1963,16 @@ void CouchPlayHelper::loadAndReconcileState()
         loadedRuntimeUids.insert(uid);
     }
     m_runtimeAccessSetForUid = loadedRuntimeUids;
+
+    QJsonObject compositorUidObject = root.value(QStringLiteral("compositorUidForUsername")).toObject();
+    QHash<QString, uint> loadedCompositorUid;
+    for (auto it = compositorUidObject.constBegin(); it != compositorUidObject.constEnd(); ++it) {
+        QString user = it.key();
+        if (m_usernameToUnitName.contains(user)) {
+            loadedCompositorUid[user] = static_cast<uint>(it.value().toInteger());
+        }
+    }
+    m_compositorUidForUsername = loadedCompositorUid;
 
     if (changed) {
         saveState();
