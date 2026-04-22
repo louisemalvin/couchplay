@@ -2,10 +2,16 @@
 // SPDX-FileCopyrightText: 2025 CouchPlay Contributors
 
 #include "SystemOps.h"
+#include "PolkitActions.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+
+#ifdef HAVE_POLKITQT
+#include <PolkitQt1/Authority>
+#include <PolkitQt1/Subject>
+#endif
 
 #include <cerrno>
 #include <cstring>
@@ -128,11 +134,50 @@ bool RealSystemOps::killProcess(pid_t pid, int signal)
     return ::kill(pid, signal) == 0;
 }
 
-bool RealSystemOps::checkAuthorization(const QString &action)
+bool RealSystemOps::checkAuthorization(const QString &action, const QString &callerBusName)
 {
-    Q_UNUSED(action)
+    // Only user account lifecycle actions require Polkit authentication.
+    // Other privileged operations (device ownership, instance launch, mount
+    // management) rely on D-Bus system bus ACL restricted to wheel/games groups.
+    // Rationale: user accounts persist beyond the session; other operations are
+    // transient and scoped to the local machine where physical access is assumed.
+    if (action != PolkitActions::ACTION_CREATE_USER
+        && action != PolkitActions::ACTION_DELETE_USER) {
+        return true;
+    }
 
-    // TODO: Implement proper PolicyKit authorization check
-    // Currently trusts the D-Bus system bus ACL for access control
+    if (callerBusName.isEmpty()) {
+        qWarning() << "checkAuthorization: caller bus name is empty";
+        return false;
+    }
+
+#ifdef HAVE_POLKITQT
+    PolkitQt1::Authority *authority = PolkitQt1::Authority::instance();
+    if (authority->hasError()) {
+        qWarning() << "Polkit authority error:" << authority->lastError()
+                   << "- denying action:" << action;
+        return false;
+    }
+
+    PolkitQt1::Authority::Result result =
+        authority->checkAuthorizationSync(
+            action,
+            PolkitQt1::SystemBusNameSubject(callerBusName),
+            PolkitQt1::Authority::AllowUserInteraction);
+
+    if (result == PolkitQt1::Authority::Unknown) {
+        qWarning() << "Polkit returned Unknown (daemon unavailable?) for action:" << action
+                   << "caller:" << callerBusName;
+        return false;
+    }
+    if (result != PolkitQt1::Authority::Yes) {
+        qWarning() << "Polkit authorization denied for action:" << action
+                   << "caller:" << callerBusName;
+        return false;
+    }
     return true;
+#else
+    qWarning() << "Polkit not available, denying privileged action:" << action;
+    return false;
+#endif
 }
