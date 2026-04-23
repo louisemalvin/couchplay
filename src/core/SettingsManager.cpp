@@ -29,7 +29,7 @@ void SettingsManager::loadSettings()
     KConfigGroup gamescope = config->group(QStringLiteral("Gamescope"));
     m_scalingMode = gamescope.readEntry(QStringLiteral("ScalingMode"), QStringLiteral("fit"));
     m_filterMode = gamescope.readEntry(QStringLiteral("FilterMode"), QStringLiteral("linear"));
-    m_borderlessWindows = gamescope.readEntry(QStringLiteral("BorderlessWindows"), false);
+    m_borderlessWindows = gamescope.readEntry(QStringLiteral("BorderlessWindows"), true);
     
     qDebug() << "SettingsManager: Loaded settings from couchplayrc";
 }
@@ -160,7 +160,7 @@ void SettingsManager::resetToDefaults()
     m_restoreSession = false;
     m_scalingMode = QStringLiteral("fit");
     m_filterMode = QStringLiteral("linear");
-    m_borderlessWindows = false;
+    m_borderlessWindows = true;
     m_ignoredDevices.clear();
     
     saveAllSettings();

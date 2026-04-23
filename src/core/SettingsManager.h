@@ -88,7 +88,7 @@ private:
     // Gamescope settings
     QString m_scalingMode = QStringLiteral("fit");
     QString m_filterMode = QStringLiteral("linear");
-    bool m_borderlessWindows = false;
+    bool m_borderlessWindows = true;
 
     // Device settings
     QStringList m_ignoredDevices;
