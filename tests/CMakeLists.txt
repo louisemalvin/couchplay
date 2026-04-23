@@ -109,6 +109,11 @@ function(add_helper_test TEST_NAME)
         Qt6::Test
     )
 
+    if(PolkitQt6-1_FOUND)
+        target_link_libraries(${TEST_NAME} PRIVATE PolkitQt6-1::Core)
+        target_compile_definitions(${TEST_NAME} PRIVATE HAVE_POLKITQT)
+    endif()
+
     target_include_directories(${TEST_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../helper

@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-project(couchplay VERSION 0.3.2 LANGUAGES CXX)
+project(couchplay VERSION 0.3.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,6 +48,14 @@ find_package(KF6 6.0 REQUIRED COMPONENTS
     QQC2DesktopStyle
     GlobalAccel
 )
+
+# Find PolkitQt6-1 (optional — helper will deny user-management actions without it)
+find_package(PolkitQt6-1)
+if(NOT PolkitQt6-1_FOUND)
+    message(WARNING "PolkitQt6-1 not found: CouchPlay helper will compile WITHOUT Polkit "
+                     "authorization. User management actions will be denied. "
+                     "Install polkit-qt6-devel (or equivalent) to enable.")
+endif()
 
 # Find QML modules at runtime
 ecm_find_qmlmodule(org.kde.kirigami REQUIRED)

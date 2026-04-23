@@ -64,6 +64,17 @@
   </screenshots>
   
   <releases>
+    <release version="0.3.3" date="2026-04-23">
+      <description>
+        <p>Bug fix and feature release</p>
+        <ul>
+          <li>Implement Polkit authorization for CreateUser/DeleteUser</li>
+          <li>Fix device assignment cache in autoAssignControllers and unassignAll</li>
+          <li>Fix audio runtime access tracking on TCP listener teardown</li>
+          <li>Fix borderlessWindows setting persistence and default to true</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.2" date="2026-04-20">
       <description>
         <p>Bug fix release</p>
