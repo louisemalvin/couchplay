@@ -64,6 +64,14 @@
   </screenshots>
   
   <releases>
+    <release version="0.3.4" date="2026-05-07">
+      <description>
+        <p>Bug fix release</p>
+        <ul>
+          <li>Make PolkitQt6-1 a required CMake dependency to prevent silent build failures</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.3" date="2026-04-23">
       <description>
         <p>Bug fix and feature release</p>
