@@ -15,6 +15,7 @@ add_executable(couchplay-helper
 target_link_libraries(couchplay-helper PRIVATE
     Qt6::Core
     Qt6::DBus
+    acl
 )
 
 if(PolkitQt6-1_FOUND)
@@ -28,5 +29,5 @@ target_include_directories(couchplay-helper PRIVATE
 
 # Install to libexec
 install(TARGETS couchplay-helper
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}
+    DESTINATION libexec
 )

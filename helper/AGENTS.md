@@ -28,7 +28,7 @@ D-Bus privileged service for split-screen gaming: user creation, device ownershi
 | Process helper | CouchPlayHelper.cpp:runCommand() | Shared QProcess spawn/await (8 call sites) |
 | ACL cleanup | CouchPlayHelper.cpp:removeRuntimeAcls() | Shared method for runtime directory ACL reset |
 | State persistence | CouchPlayHelper.cpp:saveState()/loadAndReconcileState() | JSON at /run/couchplay/state.json |
-| Authorization | CouchPlayHelper.cpp:658 | TODO: Implement proper PolicyKit check |
+| Authorization | SystemOps.cpp:checkAuthorization() | Fail-closed Polkit check bound to the caller's D-Bus service name |
 
 ## CONVENTIONS
 
@@ -42,7 +42,7 @@ D-Bus privileged service for split-screen gaming: user creation, device ownershi
 
 ## ANTI-PATTERNS
 
-- **No Polkit authorization**: checkAuthorization() stub returns true (TODO:658)
+- **Authorization-sensitive API**: Every new mutating D-Bus method must validate its caller, target and Polkit action before changing state.
 - **Process blocking**: QProcess::waitForFinished() used synchronously (acceptable for daemon)
 - **No signal/slot IPC**: D-Bus only - no Qt signals across process boundary
 - **Hardcoded paths**: Uses /usr/sbin/useradd, /usr/bin/mount directly

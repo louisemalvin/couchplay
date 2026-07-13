@@ -2,14 +2,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2025 CouchPlay Contributors
 #
-# CouchPlay One-Liner Installer
+# CouchPlay Release Installer
 #
 # Downloads and installs CouchPlay from GitHub releases.
 # This script must be run with root privileges.
 #
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/hikaps/couchplay/main/scripts/install.sh | bash
-#   sudo ./install.sh
+# Usage: download and inspect this script, then run `sudo ./install.sh`.
 #
 # Requirements:
 #   - curl: for downloading files
@@ -17,13 +15,10 @@
 #   - sha256sum: for verifying checksums
 #   - x86_64 architecture
 
-# Re-run with sudo if not root (allows piped input to work with visible output)
 if [[ $EUID -ne 0 ]]; then
-    echo "Requesting sudo access to install CouchPlay..."
-    TMP_SCRIPT=$(mktemp)
-    curl -fsSL https://raw.githubusercontent.com/hikaps/couchplay/main/scripts/install.sh > "$TMP_SCRIPT"
-    chmod +x "$TMP_SCRIPT"
-    exec sudo "$TMP_SCRIPT"
+    echo "This reviewed local script must be run as root (use sudo)." >&2
+    echo "Do not pipe a remote script into a shell." >&2
+    exit 1
 fi
 
 set -e

@@ -43,6 +43,7 @@ private Q_SLOTS:
     void testDeleteProfile();
     void testSavedProfiles();
     void testRefreshProfiles();
+    void testRejectsProfilePathTraversal();
     
     // Signal tests
     void testInstanceCountChangedSignal();
@@ -324,6 +325,14 @@ void TestSessionManager::testGetAssignedUsers()
     assigned = m_sessionManager->getAssignedUsers(0);
     QCOMPARE(assigned.size(), 1);
     QVERIFY(assigned.contains(QStringLiteral("player3")));
+}
+
+void TestSessionManager::testRejectsProfilePathTraversal()
+{
+    QVERIFY(!m_sessionManager->saveProfile(QStringLiteral("../escape")));
+    QVERIFY(!m_sessionManager->loadProfile(QStringLiteral("../escape")));
+    QVERIFY(!m_sessionManager->deleteProfile(QStringLiteral("../escape")));
+    QVERIFY(!m_sessionManager->saveProfile(QStringLiteral("name/escape")));
 }
 
 QTEST_MAIN(TestSessionManager)

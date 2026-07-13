@@ -13,6 +13,8 @@
 #include <QStringList>
 #include <QThread>
 
+#include <optional>
+
 #include <pwd.h>
 #include <grp.h>
 #include <signal.h>
@@ -42,6 +44,27 @@ public:
     virtual bool removeFile(const QString &path) = 0;
     virtual bool copyFile(const QString &source, const QString &dest) = 0;
     virtual bool writeFile(const QString &path, const QByteArray &content) = 0;
+    virtual bool createDirectoryBeneath(const QString &baseDirectory,
+                                        const QString &relativePath,
+                                        uid_t owner, gid_t group, mode_t mode) = 0;
+    virtual bool writeFileBeneath(const QString &baseDirectory,
+                                  const QString &relativePath,
+                                  const QByteArray &content,
+                                  uid_t owner, gid_t group, mode_t mode) = 0;
+    virtual bool removeFileBeneath(const QString &baseDirectory,
+                                   const QString &relativePath,
+                                   uid_t owner) = 0;
+    virtual bool copyFileBeneath(const QString &sourcePath, uid_t sourceOwner,
+                                 const QString &baseDirectory,
+                                 const QString &relativePath,
+                                 uid_t owner, gid_t group, mode_t mode) = 0;
+    virtual bool bindMountBeneath(const QString &sourcePath, uid_t sourceOwner,
+                                  const QString &baseDirectory,
+                                  const QString &relativeTarget) = 0;
+    virtual bool setUserAcl(const QString &path, uid_t pathOwner, uid_t targetUid,
+                            bool read, bool execute, bool remove) = 0;
+    virtual bool setGroupAcl(const QString &path, uid_t pathOwner, gid_t targetGid,
+                             bool read, bool write, bool execute, bool remove) = 0;
 
     // Device path validation
     virtual bool statPath(const QString &path, struct stat *buf) = 0;
@@ -67,6 +90,7 @@ public:
 
     // Authorization check
     virtual bool checkAuthorization(const QString &action, const QString &callerBusName) = 0;
+    virtual std::optional<uid_t> serviceUid(const QString &callerBusName) = 0;
 };
 
 /**
@@ -89,6 +113,27 @@ public:
     bool removeFile(const QString &path) override;
     bool copyFile(const QString &source, const QString &dest) override;
     bool writeFile(const QString &path, const QByteArray &content) override;
+    bool createDirectoryBeneath(const QString &baseDirectory,
+                                const QString &relativePath,
+                                uid_t owner, gid_t group, mode_t mode) override;
+    bool writeFileBeneath(const QString &baseDirectory,
+                          const QString &relativePath,
+                          const QByteArray &content,
+                          uid_t owner, gid_t group, mode_t mode) override;
+    bool removeFileBeneath(const QString &baseDirectory,
+                           const QString &relativePath,
+                           uid_t owner) override;
+    bool copyFileBeneath(const QString &sourcePath, uid_t sourceOwner,
+                         const QString &baseDirectory,
+                         const QString &relativePath,
+                         uid_t owner, gid_t group, mode_t mode) override;
+    bool bindMountBeneath(const QString &sourcePath, uid_t sourceOwner,
+                          const QString &baseDirectory,
+                          const QString &relativeTarget) override;
+    bool setUserAcl(const QString &path, uid_t pathOwner, uid_t targetUid,
+                    bool read, bool execute, bool remove) override;
+    bool setGroupAcl(const QString &path, uid_t pathOwner, gid_t targetGid,
+                     bool read, bool write, bool execute, bool remove) override;
 
     bool statPath(const QString &path, struct stat *buf) override;
     bool isCharDevice(mode_t mode) override;
@@ -108,4 +153,5 @@ public:
     bool killProcess(pid_t pid, int signal) override;
 
     bool checkAuthorization(const QString &action, const QString &callerBusName) override;
+    std::optional<uid_t> serviceUid(const QString &callerBusName) override;
 };

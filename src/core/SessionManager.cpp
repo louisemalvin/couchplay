@@ -6,6 +6,7 @@
 #include "SessionRunner.h"
 
 #include <QDir>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QDebug>
 
@@ -28,6 +29,14 @@ SessionManager::~SessionManager() = default;
 QString SessionManager::profilePath(const QString &name) const
 {
     return profilesDir() + QStringLiteral("/") + name + QStringLiteral(".conf");
+}
+
+bool SessionManager::isValidProfileName(const QString &name) const
+{
+    static const QRegularExpression validName(
+        QStringLiteral("^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$"));
+    return validName.match(name).hasMatch() && name != QStringLiteral(".")
+        && name != QStringLiteral("..");
 }
 
 void SessionManager::newSession()
@@ -60,6 +69,9 @@ void SessionManager::refreshProfiles()
     for (const QString &fileName : dir.entryList(filters, QDir::Files)) {
         QString name = fileName;
         name.chop(5); // Remove ".conf"
+        if (!isValidProfileName(name)) {
+            continue;
+        }
 
         SessionProfile profile;
         profile.name = name;
@@ -78,8 +90,8 @@ void SessionManager::refreshProfiles()
 
 bool SessionManager::saveProfile(const QString &name)
 {
-    if (name.isEmpty()) {
-        Q_EMIT errorOccurred(QStringLiteral("Profile name cannot be empty"));
+    if (!isValidProfileName(name)) {
+        Q_EMIT errorOccurred(QStringLiteral("Profile name contains unsupported characters"));
         return false;
     }
 
@@ -137,6 +149,11 @@ bool SessionManager::saveProfile(const QString &name)
 
 bool SessionManager::loadProfile(const QString &name)
 {
+    if (!isValidProfileName(name)) {
+        Q_EMIT errorOccurred(QStringLiteral("Invalid profile name"));
+        return false;
+    }
+
     QString path = profilePath(name);
 
     if (!QFile::exists(path)) {
@@ -220,6 +237,11 @@ bool SessionManager::loadProfile(const QString &name)
 
 bool SessionManager::deleteProfile(const QString &name)
 {
+    if (!isValidProfileName(name)) {
+        Q_EMIT errorOccurred(QStringLiteral("Invalid profile name"));
+        return false;
+    }
+
     QString path = profilePath(name);
 
     if (!QFile::exists(path)) {
@@ -546,5 +568,4 @@ QStringList SessionManager::getAssignedUsers(int excludeIndex) const
     }
     return assigned;
 }
-
 

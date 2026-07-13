@@ -128,6 +128,11 @@ QString SteamConfigManager::getSteamUserId() const
 
 QString SteamConfigManager::getTargetSteamUserId(const QString &username) const
 {
+    struct passwd *currentPw = getpwuid(getuid());
+    if (currentPw && username == QString::fromLocal8Bit(currentPw->pw_name)) {
+        return getSteamUserId();
+    }
+
     // Use helper to get Steam ID since we can't read other users' home directories
     if (m_helperClient && m_helperClient->isAvailable()) {
         QString steamId = m_helperClient->getUserSteamId(username);

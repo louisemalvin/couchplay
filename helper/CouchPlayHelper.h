@@ -313,8 +313,22 @@ Q_SIGNALS:
 
 private:
     bool checkAuthorization(const QString &action);
+    std::optional<uid_t> callerUid() const;
+    bool isRegularUser(const QString &username, uint *uid = nullptr);
+    bool isAllowedSessionUser(const QString &username, bool allowCaller);
+    bool validateSessionUserAndAuth(const QString &username, const QString &action,
+                                    bool allowCaller);
+    bool validateCallerUid(uint uid, const QString &operation);
+    bool resolveAllowedUserTarget(const QString &path, const QString &username,
+                                  bool directory, QString *userHome,
+                                  QString *relativePath);
+    bool resolveCallerOwnedPath(const QString &path, bool directory,
+                                QString *canonicalPath);
+    bool resolveAllowedSharePath(const QString &path, QString *canonicalPath,
+                                 bool directory = true);
     bool isValidDevicePath(const QString &path);
     bool validateUserAndAuth(const QString &username, const QString &action);
+    int resetAllDevicesInternal();
     bool runCommand(const QString &program, const QStringList &args, int timeoutMs = 10000);
     bool setupPulseTcpListener(uint compositorUid);
     void removePulseTcpListener(uint compositorUid);
@@ -333,10 +347,8 @@ private:
                               const QStringList &bindPaths);
     void stopServiceInstance(const QString &serviceName);
     void monitorUnitState(const QString &serviceName, const QString &username, qint64 mainPid);
-    QString computeMountTarget(const QString &source, const QString &alias,
-                               const QString &userHome, const QString &compositorHome);
-    bool validateUserPath(const QString &path, const QString &username,
-                          const QString &callerName, QStringList &dirsToChown);
+    void trackManagedAcl(const QString &path, const QString &username);
+    void removeManagedAcls(const QString &username = QString());
 
     QStringList m_modifiedDevices;
 
@@ -346,6 +358,12 @@ private:
         QString target;
     };
     QMap<QString, QList<MountInfo>> m_activeMounts;  // username -> list of mounts
+
+    struct ManagedAcl {
+        QString path;
+        QString username;
+    };
+    QList<ManagedAcl> m_managedAcls;
 
     // Track launched transient units
     QMap<QString, QString> m_usernameToUnitName;  // username -> service name

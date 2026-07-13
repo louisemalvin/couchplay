@@ -127,7 +127,7 @@ ctest --test-dir build --output-on-failure
 - **No linting config**: No `.clang-format`, `.clang-tidy`, `.editorconfig`
 - **Test source inclusion**: Tests include source files directly instead of linking targets (see `tests/CMakeLists.txt`)
 - **Gamescope host requirement**: App must run on host, not in container (gamescope needs host display)
-- **Incomplete Polkit**: Helper service has `TODO: Implement proper PolicyKit authorization check`
+- **Polkit boundary**: Production authorization is fail-closed and bound to the calling D-Bus service name. Keep hostile-caller tests when changing helper methods.
 - **Missing i18n infrastructure**: `KF6::I18n` linked but no `po/` directory or translation files exist
 
 ## UNIQUE PATTERNS
@@ -160,7 +160,7 @@ ctest --test-dir build --output-on-failure
 - **Build artifacts**: Ignore `build/` directory
 - **Root test files**: `test_*.cpp` are temporary/experimental, not part of test suite
 - **CI exclusions**: CI skips 7/14 tests requiring D-Bus/Polkit/devices (see `.github/workflows/ci.yml`)
-- **Security TODO**: `helper/SystemOps.cpp:checkAuthorization()` stub returns true (Polkit not implemented)
+- **Security boundary**: `helper/SystemOps.cpp:checkAuthorization()` performs the production Polkit check. Test bypasses belong only in `MockSystemOps`.
 
 ## GIT META
 

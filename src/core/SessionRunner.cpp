@@ -20,8 +20,10 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QCryptographicHash>
+#include <QRegularExpression>
 #include <QScreen>
 #include <QSet>
 #include <QStandardPaths>
@@ -450,9 +452,25 @@ void SessionRunner::cleanupInstances()
 
 void SessionRunner::cleanupOverrideDirs(const QStringList &overridePaths)
 {
+    QString overridesBase = QDir::cleanPath(
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+        + QStringLiteral("/overrides"));
     for (const QString &path : overridePaths) {
-        QDir dir(path);
+        QString cleaned = QDir::cleanPath(path);
+        if (path.isEmpty() || !cleaned.startsWith(overridesBase + QLatin1Char('/'))) {
+            qCWarning(couchplayCore) << "Refusing to clean unsafe override path:" << path;
+            continue;
+        }
+
+        QDir dir(cleaned);
         if (dir.exists()) {
+            QString canonical = QFileInfo(cleaned).canonicalFilePath();
+            if (canonical.isEmpty()
+                || !canonical.startsWith(overridesBase + QLatin1Char('/'))) {
+                qCWarning(couchplayCore) << "Refusing to clean override path outside staging root:"
+                                        << path;
+                continue;
+            }
             if (dir.removeRecursively()) {
                 qCDebug(couchplayCore) << "Cleaned up override staging directory:" << path;
             } else {
@@ -553,6 +571,9 @@ bool SessionRunner::setupSharedDirectories()
     }
 
     uint compositorUid = static_cast<uint>(getuid());
+    struct passwd *compositorPw = getpwuid(getuid());
+    QString compositorUser = compositorPw
+        ? QString::fromLocal8Bit(compositorPw->pw_name) : QString();
 
     const auto &profile = m_sessionManager->currentProfile();
     bool allSucceeded = true;
@@ -561,7 +582,7 @@ bool SessionRunner::setupSharedDirectories()
         const QString &username = profile.instances[i].username;
         const QStringList &sharedDirs = profile.instances[i].sharedDirectories;
         
-        if (username.isEmpty()) {
+        if (username.isEmpty() || username == compositorUser) {
             continue;
         }
 
@@ -648,6 +669,10 @@ bool SessionRunner::buildBindPaths()
             presetId = QStringLiteral("steam");  // Default preset
         }
         QString overridesRoot = getOverridesRootPath(presetId, gameId);
+        if (overridesRoot.isEmpty()) {
+            qCWarning(couchplaySharing) << "Unsafe preset or game identifier, skipping overrides";
+            continue;
+        }
 
         // Bind format: "<stagingDir>/<relativeFile>:<gamePath>/<relativeFile>"
         QStringList bindPaths;
@@ -677,12 +702,15 @@ bool SessionRunner::setupLauncherAccess()
 
     const auto &profile = m_sessionManager->currentProfile();
     bool allSucceeded = true;
+    struct passwd *compositorPw = getpwuid(getuid());
+    QString compositorUser = compositorPw
+        ? QString::fromLocal8Bit(compositorPw->pw_name) : QString();
 
     for (int i = 0; i < profile.instances.size(); ++i) {
         const QString &username = profile.instances[i].username;
         const QString &presetId = profile.instances[i].presetId;
 
-        if (username.isEmpty()) {
+        if (username.isEmpty() || username == compositorUser) {
             qCDebug(couchplaySteam) << "Skipping instance" << i << "- no username";
             continue;
         }
@@ -782,6 +810,12 @@ QRect SessionRunner::getScreenGeometry() const
 
 QString SessionRunner::getOverridesRootPath(const QString &presetId, const QString &gameKeyHash)
 {
+    static const QRegularExpression safeComponent(QStringLiteral("^[A-Za-z0-9._-]+$"));
+    if (!safeComponent.match(presetId).hasMatch()
+        || !safeComponent.match(gameKeyHash).hasMatch()) {
+        return QString();
+    }
+
     QString basePath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QString path = basePath + QStringLiteral("/overrides/") + presetId + QStringLiteral("/") + gameKeyHash + QStringLiteral("/");
     return path;
@@ -789,6 +823,11 @@ QString SessionRunner::getOverridesRootPath(const QString &presetId, const QStri
 
 QString SessionRunner::getAndEnsureOverridesPath(const QString &presetId)
 {
+    static const QRegularExpression safeComponent(QStringLiteral("^[A-Za-z0-9._-]+$"));
+    if (!safeComponent.match(presetId).hasMatch()) {
+        return QString();
+    }
+
     QString basePath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QString overridesPath = basePath + QStringLiteral("/overrides/") + presetId + QStringLiteral("/");
     
@@ -962,6 +1001,7 @@ void SessionRunner::onInstanceStopped()
             uninhibitScreenSaver();
             setStatus(QStringLiteral("Session ended"));
             restoreDeviceOwnership();
+            teardownSharedDirectories();
             Q_EMIT runningChanged();
             Q_EMIT sessionStopped();
         }

@@ -170,6 +170,7 @@ Q_SIGNALS:
 private:
     QString profilesDir() const;
     QString profilePath(const QString &name) const;
+    bool isValidProfileName(const QString &name) const;
 
     SessionProfile m_currentProfile;
     QList<SessionProfile> m_savedProfiles;

@@ -107,6 +107,7 @@ function(add_helper_test TEST_NAME)
         Qt6::Core
         Qt6::DBus
         Qt6::Test
+        acl
     )
 
     if(PolkitQt6-1_FOUND)

@@ -14,7 +14,7 @@ Group=root
 
 # Security hardening - relaxed for user creation
 # NOTE: User creation requires write access to /etc and /home, so we use minimal restrictions
-NoNewPrivileges=false
+NoNewPrivileges=true
 ProtectSystem=false
 ProtectHome=false
 PrivateTmp=true
@@ -22,8 +22,15 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=false
 RestrictRealtime=true
-RestrictSUIDSGID=false
+RestrictSUIDSGID=true
 MemoryDenyWriteExecute=true
+LockPersonality=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+UMask=0077
 
 # Allow access to input devices
 ReadWritePaths=/dev/input

@@ -7,6 +7,10 @@
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusReply>
+#include <QFile>
+#include <QTemporaryDir>
+
+#include <cstring>
 
 #define private public
 #include "../helper/CouchPlayHelper.h"
@@ -48,6 +52,7 @@ public:
     void setDirectoryExists(const QString &path, bool exists) { m_directories[path] = exists; }
     void setChownResult(int result) { m_chownResult = result; }
     void setChmodResult(int result) { m_chmodResult = result; }
+    void setCallerUid(uid_t uid) { m_callerUid = uid; }
 
     void clear() {
         m_pwEntries.clear();
@@ -63,6 +68,7 @@ public:
         m_mockProcessStart = false;
         m_standardOutput.clear();
         m_standardError.clear();
+        m_callerUid = 1000;
     }
 
     QStringList getLastProcessArgs() const { return m_processArgs; }
@@ -134,9 +140,87 @@ public:
         return true;
     }
 
-    bool statPath(const QString &path, struct stat *buf) override {
+    bool createDirectoryBeneath(const QString &baseDirectory, const QString &relativePath,
+                                uid_t owner, gid_t group, mode_t mode) override {
+        Q_UNUSED(baseDirectory)
+        Q_UNUSED(relativePath)
+        Q_UNUSED(owner)
+        Q_UNUSED(group)
+        Q_UNUSED(mode)
+        return true;
+    }
+
+    bool writeFileBeneath(const QString &baseDirectory, const QString &relativePath,
+                          const QByteArray &content, uid_t owner, gid_t group,
+                          mode_t mode) override {
+        Q_UNUSED(baseDirectory)
+        Q_UNUSED(relativePath)
+        Q_UNUSED(content)
+        Q_UNUSED(owner)
+        Q_UNUSED(group)
+        Q_UNUSED(mode)
+        return true;
+    }
+
+    bool removeFileBeneath(const QString &baseDirectory, const QString &relativePath,
+                           uid_t owner) override {
+        Q_UNUSED(baseDirectory)
+        Q_UNUSED(relativePath)
+        Q_UNUSED(owner)
+        return true;
+    }
+
+    bool copyFileBeneath(const QString &sourcePath, uid_t sourceOwner,
+                         const QString &baseDirectory, const QString &relativePath,
+                         uid_t owner, gid_t group, mode_t mode) override {
+        Q_UNUSED(sourcePath)
+        Q_UNUSED(sourceOwner)
+        Q_UNUSED(baseDirectory)
+        Q_UNUSED(relativePath)
+        Q_UNUSED(owner)
+        Q_UNUSED(group)
+        Q_UNUSED(mode)
+        return true;
+    }
+
+    bool bindMountBeneath(const QString &sourcePath, uid_t sourceOwner,
+                          const QString &baseDirectory,
+                          const QString &relativeTarget) override {
+        Q_UNUSED(sourcePath)
+        Q_UNUSED(sourceOwner)
+        Q_UNUSED(baseDirectory)
+        Q_UNUSED(relativeTarget)
+        return true;
+    }
+
+    bool setUserAcl(const QString &path, uid_t pathOwner, uid_t targetUid,
+                    bool read, bool execute, bool remove) override {
         Q_UNUSED(path)
-        Q_UNUSED(buf)
+        Q_UNUSED(pathOwner)
+        Q_UNUSED(targetUid)
+        Q_UNUSED(read)
+        Q_UNUSED(execute)
+        Q_UNUSED(remove)
+        return true;
+    }
+
+    bool setGroupAcl(const QString &path, uid_t pathOwner, gid_t targetGid,
+                     bool read, bool write, bool execute, bool remove) override {
+        Q_UNUSED(path)
+        Q_UNUSED(pathOwner)
+        Q_UNUSED(targetGid)
+        Q_UNUSED(read)
+        Q_UNUSED(write)
+        Q_UNUSED(execute)
+        Q_UNUSED(remove)
+        return true;
+    }
+
+    bool statPath(const QString &path, struct stat *buf) override {
+        std::memset(buf, 0, sizeof(*buf));
+        buf->st_uid = m_callerUid;
+        buf->st_gid = m_callerUid;
+        buf->st_mode = m_directories.value(path, false) ? S_IFDIR | 0755 : S_IFREG | 0644;
         return true;
     }
 
@@ -214,6 +298,11 @@ public:
         return m_authorized;
     }
 
+    std::optional<uid_t> serviceUid(const QString &callerBusName) override {
+        Q_UNUSED(callerBusName)
+        return m_callerUid;
+    }
+
 private:
     struct PwEntry {
         struct passwd pw;
@@ -271,6 +360,7 @@ private:
     bool m_mockProcessStart = false;
     QByteArray m_standardOutput;
     QByteArray m_standardError;
+    uid_t m_callerUid = 1000;
 };
 
 class TestCouchPlayHelper : public QObject
@@ -296,6 +386,7 @@ private Q_SLOTS:
     void testDeleteUserAuthDenied();
     void testDeleteUserNotInCouchPlayGroup();
     void testDeleteUserProcessFailure();
+    void testDeleteUserRejectsCaller();
     void testIsInCouchPlayGroupTrue();
     void testIsInCouchPlayGroupFalse();
     void testIsInCouchPlayGroupNonexistent();
@@ -338,10 +429,7 @@ private Q_SLOTS:
     void testSetupRuntimeAccessUserNotFound();
     void testRemoveRuntimeAccessSuccess();
     void testRemoveRuntimeAccessAuthorizationDenied();
-    void testRemoveRuntimeAccessUserNotFound();
-
-    // Version test
-    void testVersion();
+    void testRemoveRuntimeAccessRejectsForeignUid();
 
     // Launch/Stop/Kill instance tests
     void testGenerateServiceName();
@@ -349,10 +437,19 @@ private Q_SLOTS:
     void testLaunchInstance_withBindPaths();
     void testLaunchInstance_validationEmptyUsername();
     void testLaunchInstance_validationNonexistentUser();
+    void testLaunchInstance_rejectsRootTarget();
+    void testLaunchInstance_rejectsForeignCompositorUid();
     void testStopInstance_serviceStop();
     void testKillInstance_serviceKill();
-    void testStopInstance_fallbackToDirectKill();
+    void testStopInstanceRejectsUntrackedPid();
+    void testKillInstanceRejectsUntrackedPid();
     void testLaunchInstance_staleUnitRecovery();
+
+    // Security regression tests
+    void testWriteFileRejectsTraversal();
+    void testSetDirectoryAclRejectsSystemPath();
+    void testMountSharedDirectoriesRejectsAlias();
+    void testRealSystemOpsAclUsesOpenedPath();
 
 private:
     CouchPlayHelper *m_helper = nullptr;
@@ -627,6 +724,22 @@ void TestCouchPlayHelper::testDeleteUserProcessFailure()
     QCOMPARE(reply.error().type(), QDBusError::Failed);
 }
 
+void TestCouchPlayHelper::testDeleteUserRejectsCaller()
+{
+    m_ops->clear();
+    m_ops->setCallerUid(1000);
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001,
+                          {QStringLiteral("desktopuser")});
+    m_ops->setUserExists(QStringLiteral("desktopuser"), true, 1000, 1000,
+                         QStringLiteral("/home/desktopuser"));
+
+    QDBusReply<bool> reply = m_dbusInterface->call(
+        QStringLiteral("DeleteUser"), QStringLiteral("desktopuser"), true);
+
+    QVERIFY(!reply.isValid());
+    QCOMPARE(reply.error().type(), QDBusError::AccessDenied);
+}
+
 void TestCouchPlayHelper::testIsInCouchPlayGroupTrue()
 {
     m_ops->clear();
@@ -686,6 +799,7 @@ void TestCouchPlayHelper::testIsInCouchPlayGroupNonexistentGroup()
 void TestCouchPlayHelper::testEnableLingerSuccess()
 {
     m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {QStringLiteral("testuser")});
     m_ops->setUserExists(QStringLiteral("testuser"), true, 1002, 1002);
     m_ops->setProcessExitCode(0);
 
@@ -742,6 +856,7 @@ void TestCouchPlayHelper::testEnableLingerAuthDenied()
 void TestCouchPlayHelper::testEnableLingerProcessFailure()
 {
     m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {QStringLiteral("testuser")});
     m_ops->setUserExists(QStringLiteral("testuser"), true, 1002, 1002);
     m_ops->setProcessExitCode(1);
 
@@ -1038,6 +1153,7 @@ void TestCouchPlayHelper::testResetAllDevicesEmpty()
 void TestCouchPlayHelper::testResetAllDevicesSuccess()
 {
     m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1002, {QStringLiteral("testuser2")});
     m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
     m_ops->setUserExists(QStringLiteral("testuser1"), true, 1000, 1000);
     m_ops->setUserExists(QStringLiteral("testuser2"), true, 1001, 1001);
@@ -1070,6 +1186,7 @@ void TestCouchPlayHelper::testResetAllDevicesSuccess()
 void TestCouchPlayHelper::testResetAllDevicesPartialFailure()
 {
     m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1002, {QStringLiteral("testuser2")});
     m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
     m_ops->setUserExists(QStringLiteral("testuser1"), true, 1000, 1000);
     m_ops->setUserExists(QStringLiteral("testuser2"), true, 1001, 1001);
@@ -1227,6 +1344,7 @@ void TestCouchPlayHelper::testSetupRuntimeAccessAuthorizationDenied()
 void TestCouchPlayHelper::testSetupRuntimeAccessUserNotFound()
 {
     m_ops->clear();
+    m_ops->setCallerUid(9999);
     m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
 
     QDBusReply<bool> reply = m_dbusInterface->call(
@@ -1281,35 +1399,18 @@ void TestCouchPlayHelper::testRemoveRuntimeAccessAuthorizationDenied()
     QCOMPARE(reply.error().type(), QDBusError::AccessDenied);
 }
 
-void TestCouchPlayHelper::testRemoveRuntimeAccessUserNotFound()
+void TestCouchPlayHelper::testRemoveRuntimeAccessRejectsForeignUid()
 {
     m_ops->clear();
     m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
     m_ops->setProcessExitCode(0);
-    // Compositor user does not exist, but RemoveRuntimeAccess doesn't check
-    // It just runs setfacl commands and returns success if all paths don't exist
-
     QDBusReply<bool> reply = m_dbusInterface->call(
         QStringLiteral("RemoveRuntimeAccess"),
         9999u  // Nonexistent UID
     );
 
-    // Method returns success even if user doesn't exist
-    // (it just runs setfacl on non-existent paths which is a no-op)
-    QVERIFY(reply.isValid());
-    QVERIFY(reply.value());
-}
-
-void TestCouchPlayHelper::testVersion()
-{
-    m_ops->clear();
-
-    QDBusReply<QString> reply = m_dbusInterface->call(
-        QStringLiteral("Version")
-    );
-
-    QVERIFY(reply.isValid());
-    QVERIFY(!reply.value().isEmpty());
+    QVERIFY(!reply.isValid());
+    QCOMPARE(reply.error().type(), QDBusError::AccessDenied);
 }
 
 void TestCouchPlayHelper::testGenerateServiceName()
@@ -1325,7 +1426,7 @@ void TestCouchPlayHelper::testGenerateServiceName()
 void TestCouchPlayHelper::testLaunchInstance_basicLaunch()
 {
     m_ops->clear();
-    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {QStringLiteral("player1")});
     m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
     m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001);
     m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000, QStringLiteral("/home/compositor"));
@@ -1362,9 +1463,10 @@ void TestCouchPlayHelper::testLaunchInstance_basicLaunch()
             QVERIFY(inv.args.contains(QStringLiteral("/usr/bin/gamescope")));
             QVERIFY(inv.args.contains(QStringLiteral("-W")));
             QVERIFY(inv.args.contains(QStringLiteral("960")));
-            QVERIFY(inv.args.contains(QStringLiteral("steam -tenfoot")));
-            QVERIFY(inv.args.contains(QStringLiteral("-c")));
-            QVERIFY(inv.args.contains(QStringLiteral("/bin/bash")));
+            QVERIFY(inv.args.contains(QStringLiteral("steam")));
+            QVERIFY(inv.args.contains(QStringLiteral("-tenfoot")));
+            QVERIFY(!inv.args.contains(QStringLiteral("-c")));
+            QVERIFY(!inv.args.contains(QStringLiteral("/bin/bash")));
             break;
         }
     }
@@ -1386,18 +1488,32 @@ void TestCouchPlayHelper::testLaunchInstance_basicLaunch()
 
 void TestCouchPlayHelper::testLaunchInstance_withBindPaths()
 {
+    QTemporaryDir home;
+    QVERIFY(home.isValid());
+    QString sourcePath = home.path() + QStringLiteral("/override.ini");
+    QString targetPath = home.path() + QStringLiteral("/Games/game/config.ini");
+    QVERIFY(QDir().mkpath(QFileInfo(targetPath).absolutePath()));
+    QFile sourceFile(sourcePath);
+    QVERIFY(sourceFile.open(QIODevice::WriteOnly));
+    sourceFile.write("override");
+    sourceFile.close();
+    QFile targetFile(targetPath);
+    QVERIFY(targetFile.open(QIODevice::WriteOnly));
+    targetFile.write("target");
+    targetFile.close();
+
     m_ops->clear();
-    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {QStringLiteral("player1")});
     m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
     m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001);
-    m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000, QStringLiteral("/home/compositor"));
+    m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000, home.path());
     m_ops->setFileExists(QStringLiteral("/run/user/1000"), true);
     m_ops->setFileExists(QStringLiteral("/run/user/1000/wayland-0"), true);
     m_ops->setProcessExitCode(0);
     m_ops->setMockProcessStart(true);
     m_ops->setStandardOutput(QByteArray("54321\n"));
 
-    QStringList bindPaths = {QStringLiteral("/overrides/config.ini:/games/config.ini")};
+    QStringList bindPaths = {sourcePath + QLatin1Char(':') + targetPath};
 
     QDBusReply<qint64> reply = m_dbusInterface->call(
         QStringLiteral("LaunchInstance"),
@@ -1416,7 +1532,8 @@ void TestCouchPlayHelper::testLaunchInstance_withBindPaths()
     for (const auto &inv : m_ops->m_processInvocations) {
         if (inv.command == QStringLiteral("systemd-run")) {
             for (const QString &arg : inv.args) {
-                if (arg.contains(QStringLiteral("BindPaths=/overrides/config.ini:/games/config.ini"))) {
+                if (arg.contains(QStringLiteral("BindPaths=") + sourcePath
+                                 + QLatin1Char(':') + targetPath)) {
                     foundBindPaths = true;
                     break;
                 }
@@ -1464,10 +1581,45 @@ void TestCouchPlayHelper::testLaunchInstance_validationNonexistentUser()
     QCOMPARE(reply.error().type(), QDBusError::InvalidArgs);
 }
 
+void TestCouchPlayHelper::testLaunchInstance_rejectsRootTarget()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001,
+                          {QStringLiteral("root")});
+    m_ops->setUserExists(QStringLiteral("root"), true, 0, 0, QStringLiteral("/root"));
+    m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000,
+                         QStringLiteral("/home/compositor"));
+
+    QDBusReply<qint64> reply = m_dbusInterface->call(
+        QStringLiteral("LaunchInstance"), QStringLiteral("root"), 1000u,
+        QStringList{}, QStringLiteral("id"), QStringList{}, QStringList{});
+
+    QVERIFY(!reply.isValid());
+    QCOMPARE(reply.error().type(), QDBusError::AccessDenied);
+}
+
+void TestCouchPlayHelper::testLaunchInstance_rejectsForeignCompositorUid()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001,
+                          {QStringLiteral("player1")});
+    m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001,
+                         QStringLiteral("/home/player1"));
+    m_ops->setUserExists(QStringLiteral("otherdesktop"), true, 1002, 1002,
+                         QStringLiteral("/home/otherdesktop"));
+
+    QDBusReply<qint64> reply = m_dbusInterface->call(
+        QStringLiteral("LaunchInstance"), QStringLiteral("player1"), 1002u,
+        QStringList{}, QStringLiteral("steam"), QStringList{}, QStringList{});
+
+    QVERIFY(!reply.isValid());
+    QCOMPARE(reply.error().type(), QDBusError::AccessDenied);
+}
+
 void TestCouchPlayHelper::testStopInstance_serviceStop()
 {
     m_ops->clear();
-    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {QStringLiteral("player1")});
     m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
     m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001);
     m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000, QStringLiteral("/home/compositor"));
@@ -1521,7 +1673,7 @@ void TestCouchPlayHelper::testStopInstance_serviceStop()
 void TestCouchPlayHelper::testKillInstance_serviceKill()
 {
     m_ops->clear();
-    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {QStringLiteral("player1")});
     m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
     m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001);
     m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000, QStringLiteral("/home/compositor"));
@@ -1566,7 +1718,7 @@ void TestCouchPlayHelper::testKillInstance_serviceKill()
     QVERIFY2(foundSigkill, "systemctl kill --signal=SIGKILL should be called");
 }
 
-void TestCouchPlayHelper::testStopInstance_fallbackToDirectKill()
+void TestCouchPlayHelper::testStopInstanceRejectsUntrackedPid()
 {
     m_ops->clear();
     m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
@@ -1579,14 +1731,25 @@ void TestCouchPlayHelper::testStopInstance_fallbackToDirectKill()
         qint64(99999)
     );
 
-    QVERIFY(reply.isValid());
-    QVERIFY(reply.value());
+    QVERIFY(!reply.isValid());
+    QCOMPARE(reply.error().type(), QDBusError::InvalidArgs);
+}
+
+void TestCouchPlayHelper::testKillInstanceRejectsUntrackedPid()
+{
+    m_ops->clear();
+
+    QDBusReply<bool> reply = m_dbusInterface->call(
+        QStringLiteral("KillInstance"), qint64(99999));
+
+    QVERIFY(!reply.isValid());
+    QCOMPARE(reply.error().type(), QDBusError::InvalidArgs);
 }
 
 void TestCouchPlayHelper::testLaunchInstance_staleUnitRecovery()
 {
     m_ops->clear();
-    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {});
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001, {QStringLiteral("player1")});
     m_ops->setGroupExists(QStringLiteral("input"), true, 44, {});
     m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001);
     m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000, QStringLiteral("/home/compositor"));
@@ -1635,6 +1798,72 @@ void TestCouchPlayHelper::testLaunchInstance_staleUnitRecovery()
     QVERIFY2(foundResetFailed, "systemctl reset-failed should be called during stale unit recovery");
     QVERIFY2(systemdRunCount >= 2, "systemd-run should be called at least twice (initial + retry)");
     QVERIFY2(foundEnvEFlag, "-E flag should be used for environment variables");
+}
+
+void TestCouchPlayHelper::testWriteFileRejectsTraversal()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001,
+                          {QStringLiteral("player1")});
+    m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001,
+                         QStringLiteral("/home/player1"));
+
+    QDBusReply<bool> reply = m_dbusInterface->call(
+        QStringLiteral("WriteFileToUser"), QByteArrayLiteral("unsafe"),
+        QStringLiteral("/home/player1/../etc/cron.d/couchplay"),
+        QStringLiteral("player1"));
+
+    QVERIFY(!reply.isValid());
+    QCOMPARE(reply.error().type(), QDBusError::InvalidArgs);
+}
+
+void TestCouchPlayHelper::testSetDirectoryAclRejectsSystemPath()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001,
+                          {QStringLiteral("player1")});
+    m_ops->setUserExists(QStringLiteral("desktopuser"), true, 1000, 1000,
+                         QStringLiteral("/home/desktopuser"));
+    m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001,
+                         QStringLiteral("/home/player1"));
+
+    QDBusReply<bool> reply = m_dbusInterface->call(
+        QStringLiteral("SetDirectoryAcl"), QStringLiteral("/etc"),
+        QStringLiteral("player1"), false);
+
+    QVERIFY(!reply.isValid());
+    QCOMPARE(reply.error().type(), QDBusError::InvalidArgs);
+}
+
+void TestCouchPlayHelper::testMountSharedDirectoriesRejectsAlias()
+{
+    m_ops->clear();
+    m_ops->setGroupExists(QStringLiteral("couchplay"), true, 1001,
+                          {QStringLiteral("player1")});
+    m_ops->setUserExists(QStringLiteral("compositor"), true, 1000, 1000,
+                         QStringLiteral("/home/compositor"));
+    m_ops->setUserExists(QStringLiteral("player1"), true, 1001, 1001,
+                         QStringLiteral("/home/player1"));
+
+    QDBusReply<int> reply = m_dbusInterface->call(
+        QStringLiteral("MountSharedDirectories"), QStringLiteral("player1"), 1000u,
+        QStringList{QStringLiteral("/home/compositor/Games|../../etc")});
+
+    QVERIFY(reply.isValid());
+    QCOMPARE(reply.value(), 0);
+}
+
+void TestCouchPlayHelper::testRealSystemOpsAclUsesOpenedPath()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+
+    RealSystemOps ops;
+    uid_t targetUid = getuid() + 1;
+    QVERIFY(ops.setUserAcl(directory.path(), getuid(), targetUid,
+                           true, true, false));
+    QVERIFY(ops.setUserAcl(directory.path(), getuid(), targetUid,
+                           false, false, true));
 }
 
 QTEST_MAIN(TestCouchPlayHelper)

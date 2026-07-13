@@ -83,21 +83,16 @@ install(FILES data/icons/io.github.hikaps.couchplay.png
 
 # Install polkit policy
 install(FILES data/polkit/io.github.hikaps.couchplay.policy
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/share/polkit-1/actions
+    DESTINATION share/polkit-1/actions
 )
 
 # Install D-Bus service files
 install(FILES data/dbus/io.github.hikaps.CouchPlayHelper.service
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/share/dbus-1/system-services
+    DESTINATION share/dbus-1/system-services
 )
 
 install(FILES data/dbus/io.github.hikaps.CouchPlayHelper.conf
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/share/dbus-1/system.d
-)
-
-# Install PipeWire PulseAudio config
-install(FILES data/pipewire/50-couchplay.conf
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/share/pipewire/pipewire-pulse.conf.d
+    DESTINATION share/dbus-1/system.d
 )
 
 # Summary

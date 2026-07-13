@@ -52,15 +52,18 @@ CouchPlay creates temporary Linux user accounts so each player gets isolated sav
 - 👤 **User Management**: Automatically manages temporary user accounts for isolated save data.
 - 🐧 **Atomic-Ready**: Designed for immutable distributions like Bazzite and Fedora Silverblue.
 
-## Quick Install (Linux x86_64)
+## Installation (Linux x86_64)
 
-Install the latest release with a single command:
+Download an exact release or source commit, verify it, and inspect the installer before granting root access. Do not pipe a mutable remote script into a shell.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hikaps/couchplay/main/scripts/install.sh | bash
+git checkout <reviewed-commit>
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-> **Requirements**: Linux x86_64, root privileges (sudo). This downloads and installs the latest release from GitHub, including the privileged helper service.
+Install only the locally verified build artifacts and helper configuration after reviewing the exact commit.
 
 ## Installation (Bazzite / Fedora Atomic)
 

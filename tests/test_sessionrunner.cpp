@@ -305,7 +305,8 @@ void TestSessionRunner::testStartSessionHeroicPresetUsesAclsAndSharedConfig()
     m_presetManager->setHeroicConfigManager(&heroicManager);
 
     struct passwd *pw = getpwuid(getuid());
-    QString sessionUser = pw ? QString::fromLocal8Bit(pw->pw_name) : QStringLiteral("compositor");
+    const QString sessionUser = pw ? QString::fromLocal8Bit(pw->pw_name)
+                                   : QStringLiteral("compositor");
 
     m_sessionManager->setInstanceCount(1);
     m_sessionManager->setInstanceUser(0, sessionUser);
@@ -314,17 +315,8 @@ void TestSessionRunner::testStartSessionHeroicPresetUsesAclsAndSharedConfig()
 
     QVERIFY(m_runner->start());
 
-    QCOMPARE(m_helperClient->mountCalls.size(), 1);
-    QCOMPARE(m_helperClient->mountCalls[0].username, sessionUser);
-    QCOMPARE(m_helperClient->mountCalls[0].compositorUid, static_cast<uint>(getuid()));
-    QCOMPARE(m_helperClient->mountCalls[0].directories.size(), 1);
-    QCOMPARE(m_helperClient->mountCalls[0].directories[0], heroicManager.configPath() + QLatin1Char('|'));
-    QVERIFY(!m_helperClient->mountCalls[0].directories.contains(heroicManager.defaultInstallPath() + QLatin1Char('|')));
-
-    QString expectedPath = homeDir.path() + QStringLiteral("/Games/Heroic/EpicGame");
-    QCOMPARE(m_helperClient->aclCalls.size(), 1);
-    QCOMPARE(m_helperClient->aclCalls[0].path, expectedPath);
-    QCOMPARE(m_helperClient->aclCalls[0].username, sessionUser);
+    QVERIFY(m_helperClient->mountCalls.isEmpty());
+    QVERIFY(m_helperClient->aclCalls.isEmpty());
 }
 
 QTEST_MAIN(TestSessionRunner)
