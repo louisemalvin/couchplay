@@ -34,7 +34,7 @@ D-Bus privileged service for split-screen gaming: user creation, device ownershi
 
 **D-Bus Pattern:** Q_CLASSINFO declares interface name. public Q_SLOTS exposed via D-Bus. QDBusContext inherited for caller identity.
 
-**Privileged Operations:** All via QProcess calling useradd/userdel/usermod, chown/chgrp, mount/umount, setfacl/getfacl.
+**Privileged Operations:** Account and service tools use QProcess without a shell. Caller-controlled file, mount, and ACL operations use descriptor-based syscalls and libacl.
 
 **Resource Tracking:** m_modifiedDevices (changed device paths), m_usernameToUnitName (transient units). Destructor resets all devices + unmounts all mounts.
 
@@ -54,7 +54,7 @@ D-Bus privileged service for split-screen gaming: user creation, device ownershi
 
 **Runtime ACL Dance:** SetRuntimeAccess() grants couchplay group read+execute on XDG_RUNTIME_DIR sockets (wayland-0, pipewire-0) so secondary players can access compositor resources.
 
-**Mount Aliasing:** MountSharedDirectories() supports both home-relative paths (mounted at same relative location) and absolute paths with explicit aliases or ~/.couchplay/mounts/ default.
+**Mount Targets:** MountSharedDirectories() derives targets beneath the managed user's home. Caller-supplied aliases are rejected.
 
 **Cleanup Contract:** Destructor removes all device ownership changes and unmounts all mounts, ensuring no lingering privileged state.
 

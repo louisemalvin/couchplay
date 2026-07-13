@@ -6,6 +6,12 @@
 
 <p align="center">Split-screen gaming manager for Linux, designed for KDE Plasma and Gamescope. CouchPlay enables multi-seat gaming sessions on a single PC by managing input device assignment, multiple Gamescope instances, and audio routing.</p>
 
+## About This Version
+
+This repository is an independently maintained CouchPlay variant focused on CachyOS compatibility, predictable local source builds, and a defensive privileged helper. It keeps the CouchPlay split-screen workflow and documents the caller, user, filesystem, mount, and process boundaries around privileged operations.
+
+See [SECURITY.md](SECURITY.md) for the helper's security model, installation guidance, verification expectations, and update policy.
+
 ## Screenshots
 
 <p align="center">
