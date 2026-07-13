@@ -4,140 +4,89 @@
 
 <h1 align="center">CouchPlay</h1>
 
-<p align="center">Split-screen gaming manager for Linux, designed for KDE Plasma and Gamescope. CouchPlay enables multi-seat gaming sessions on a single PC by managing input device assignment, multiple Gamescope instances, and audio routing.</p>
+<p align="center">Run multiple gaming sessions on one Linux PC with Gamescope, separate player accounts, and dedicated input devices.</p>
 
-## About This Version
-
-This repository is an independently maintained CouchPlay variant focused on CachyOS compatibility, predictable local source builds, and a defensive privileged helper. It keeps the CouchPlay split-screen workflow and documents the caller, user, filesystem, mount, and process boundaries around privileged operations.
-
-See [SECURITY.md](SECURITY.md) for the helper's security model, installation guidance, verification expectations, and update policy.
+This repository is an independently maintained fork of CouchPlay for continued development and CachyOS support.
 
 ## Screenshots
 
 <p align="center">
-  <img src="assets/couchplay-main-cropped.png" alt="CouchPlay Home" width="80%"/>
+  <img src="assets/couchplay-main-cropped.png" alt="CouchPlay home page" width="80%"/>
 </p>
 
 <p align="center">
-  <img src="assets/couchplay-session-cropped.png" alt="CouchPlay Session Configuration" width="80%"/>
+  <img src="assets/couchplay-session-cropped.png" alt="CouchPlay session configuration" width="80%"/>
 </p>
 
 <p align="center">
-  <img src="assets/couchplay-split-screen.png" alt="CouchPlay Split-Screen Gaming" width="80%"/>
+  <img src="assets/couchplay-split-screen.png" alt="CouchPlay split-screen session" width="80%"/>
 </p>
-
-## Usage
-
-### Creating a Session
-
-1. Open the **New Session** page from the sidebar.
-2. Choose a screen layout that fits your setup:
-   - **Side by Side** — splits the screen horizontally
-   - **Top and Bottom** — splits the screen vertically
-   - **Multi-Monitor** — dedicates one display per player
-3. Configure each player instance: pick a launcher (Steam, Steam Big Picture, or Heroic), then set resolution, refresh rate, and scaling options.
-4. Click **Start Session** to launch all instances through Gamescope.
-
-### Assigning Controllers
-
-Connect your gamepads, then use the **Auto-Assign Controllers** button to let CouchPlay distribute them across player instances. You can also drag and drop devices for manual assignment. Each controller gets locked to its assigned instance so inputs don't leak between players.
-
-### Profiles
-
-Save a session configuration as a profile to reload it later without reconfiguring everything. Profiles are stored as JSON files in `~/.local/share/couchplay/profiles/` and can be loaded from the session page.
-
-### Managing Users
-
-CouchPlay creates temporary Linux user accounts so each player gets isolated save data and settings. Open the **Users** page to view and manage these accounts. The helper service handles the privileged operations behind the scenes.
 
 ## Features
 
-- 🎮 **Input Isolation**: Assign specific gamepads/keyboards to specific player instances.
-- 🖥️ **Multi-Instance**: Run multiple games simultaneously using Gamescope nested compositors.
-- 🔊 **Audio Routing**: Route game audio to specific outputs (via PipeWire).
-- 👤 **User Management**: Automatically manages temporary user accounts for isolated save data.
-- 🐧 **Atomic-Ready**: Designed for immutable distributions like Bazzite and Fedora Silverblue.
+- Run multiple Gamescope instances on one desktop.
+- Assign controllers, keyboards, and mice to individual players.
+- Use separate Linux accounts for player-specific Steam data and settings.
+- Configure side-by-side, top-and-bottom, grid, and multi-monitor layouts.
+- Launch Steam, Steam Big Picture, and Heroic sessions.
+- Save reusable session profiles.
+- Route audio through PipeWire.
 
-## Installation (Linux x86_64)
+## Install on CachyOS
 
-Download an exact release or source commit, verify it, and inspect the installer before granting root access. Do not pipe a mutable remote script into a shell.
+CouchPlay is developed and tested on CachyOS with KDE Plasma on Wayland.
+
+Install the build and runtime dependencies:
 
 ```bash
-git checkout <reviewed-commit>
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-ctest --test-dir build --output-on-failure
+sudo pacman -S --needed \
+  base-devel cmake extra-cmake-modules git \
+  qt6-base qt6-declarative \
+  kirigami ki18n kcoreaddons kconfig kiconthemes \
+  qqc2-desktop-style kglobalaccel polkit-qt6 \
+  acl pipewire gamescope
 ```
 
-Install only the locally verified build artifacts and helper configuration after reviewing the exact commit.
+Clone and build:
 
-## Installation (Bazzite / Fedora Atomic)
-
-CouchPlay uses a privileged helper to manage devices and users.
-
-1. **Download** the latest release tarball from the [Releases page](../../releases).
-2. **Extract** the archive:
-   ```bash
-   tar -xJf couchplay-x86_64.tar.xz
-   cd couchplay-x86_64
-   ```
-3. **Install** the helper service (requires sudo):
-   ```bash
-   sudo ./install-helper.sh install
-   ```
-4. **Run** the application:
-   ```bash
-   ./bin/couchplay
-   ```
-
-### Uninstallation
 ```bash
-sudo ./install-helper.sh uninstall
+git clone https://github.com/louisemalvin/couchplay.git
+cd couchplay
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+cmake --build build --parallel 1
 ```
 
-## Flatpak Installation
+Install the application and its system helper:
 
-1. **Download** the `.flatpak` bundle from the [Releases page](../../releases).
-2. **Ensure the runtime is available** (Flathub provides org.kde.Platform 6.10):
-   ```bash
-   flatpak install flathub org.kde.Platform/x86_64/6.10
-   ```
-3. **Install** the Flatpak:
-   ```bash
-   flatpak install --user couchplay.flatpak
-   ```
-4. **Install the helper service** (required for device management):
-   ```bash
-   flatpak run --command=bash io.github.hikaps.couchplay -c "/app/share/couchplay/install-helper.sh export"
-   sudo ~/.local/share/couchplay/install-helper.sh install
-   ```
-
-> **Note**: The tarball installation method above is also available if you prefer it or your distribution doesn't support Flatpak.
-
-## Development
-
-### Prerequisites
-- CMake 3.20+
-- Qt 6.5+
-- KDE Frameworks 6 (Kirigami, I18n, Config, CoreAddons)
-- Gamescope
-- PipeWire (devel headers)
-- Polkit (devel headers)
-
-### Building
 ```bash
-cmake -B build
-cmake --build build
+sudo cmake --install build
+sudo ./scripts/install-helper.sh install
 ```
 
-### Running Tests
+Launch CouchPlay from the application menu or run:
+
 ```bash
-ctest --test-dir build --output-on-failure
+couchplay
 ```
+
+## Usage
+
+1. Open **Users** and create a dedicated account for each additional player.
+2. Create a session and choose a layout.
+3. Select a launcher and account for each player.
+4. Assign input devices manually or use **Auto-Assign Controllers**.
+5. Save the profile if you want to reuse it, then select **Start Session**.
+
+Profiles are stored in `~/.local/share/couchplay/profiles/`.
+
+## Upstream
+
+Based on the original [CouchPlay](https://github.com/hikaps/couchplay) project.
 
 ## AI Disclosure
 
-This project was developed with assistance from AI tools for code generation, documentation, and debugging.
+This project is developed with assistance from AI tools for code generation, documentation, and debugging.
 
 ## License
+
 GPL-3.0-or-later
