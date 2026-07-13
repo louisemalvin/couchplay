@@ -15,6 +15,7 @@
 #define private public
 #include "SessionRunner.h"
 #undef private
+#include "DeviceManager.h"
 #include "SessionManager.h"
 #include "PresetManager.h"
 #include "SteamConfigManager.h"
@@ -43,6 +44,8 @@ public:
 
     QList<AclCall> aclCalls;
     QList<MountCall> mountCalls;
+    int deviceOwnerCalls = 0;
+    bool deviceOwnerResult = true;
 
     explicit MockCouchPlayHelperClient(QObject *parent = nullptr)
         : CouchPlayHelperClient(parent)
@@ -56,11 +59,42 @@ public:
         return true;
     }
 
+    bool setDeviceOwner(const QString &devicePath, int uid) override
+    {
+        Q_UNUSED(devicePath)
+        Q_UNUSED(uid)
+        ++deviceOwnerCalls;
+        return deviceOwnerResult;
+    }
+
     int mountSharedDirectories(const QString &username, uint compositorUid,
                                const QStringList &directories) override
     {
         mountCalls.append({username, compositorUid, directories});
         return directories.size();
+    }
+};
+
+class MockDeviceManager : public DeviceManager
+{
+    Q_OBJECT
+
+public:
+    using DeviceManager::DeviceManager;
+
+    QStringList devicePaths;
+    QStringList hidrawPaths;
+
+    QStringList getDevicePathsForInstance(int instanceIndex) const override
+    {
+        Q_UNUSED(instanceIndex)
+        return devicePaths;
+    }
+
+    QStringList getHidrawPathsForInstance(int instanceIndex) const override
+    {
+        Q_UNUSED(instanceIndex)
+        return hidrawPaths;
     }
 };
 
@@ -86,6 +120,7 @@ private Q_SLOTS:
     void testSetupSteamConfigSteamIntegrationDisabled();
     void testSetupSteamConfigAppliesHeroicAcls();
     void testStartSessionHeroicPresetUsesAclsAndSharedConfig();
+    void testStartStopsAfterDeviceOwnershipDenied();
 
 private:
     void createMockHeroicConfig(const QString &basePath);
@@ -317,6 +352,30 @@ void TestSessionRunner::testStartSessionHeroicPresetUsesAclsAndSharedConfig()
 
     QVERIFY(m_helperClient->mountCalls.isEmpty());
     QVERIFY(m_helperClient->aclCalls.isEmpty());
+}
+
+void TestSessionRunner::testStartStopsAfterDeviceOwnershipDenied()
+{
+    auto *deviceManager = new MockDeviceManager(m_runner);
+    deviceManager->setHotplugEnabled(false);
+    deviceManager->devicePaths = {
+        QStringLiteral("/dev/input/event100"),
+        QStringLiteral("/dev/input/event101")
+    };
+
+    struct passwd *pw = getpwuid(getuid());
+    QVERIFY(pw != nullptr);
+
+    m_sessionManager->setInstanceCount(1);
+    m_sessionManager->setInstanceUser(0, QString::fromLocal8Bit(pw->pw_name));
+    m_runner->setDeviceManager(deviceManager);
+    m_helperClient->deviceOwnerResult = false;
+
+    QSignalSpy errorSpy(m_runner, &SessionRunner::errorOccurred);
+    QVERIFY(!m_runner->start());
+    QCOMPARE(m_helperClient->deviceOwnerCalls, 1);
+    QCOMPARE(m_runner->status(), QStringLiteral("Error"));
+    QCOMPARE(errorSpy.count(), 1);
 }
 
 QTEST_MAIN(TestSessionRunner)

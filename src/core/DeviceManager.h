@@ -131,14 +131,14 @@ public:
      * @param instanceIndex The instance index
      * @return List of device paths
      */
-    Q_INVOKABLE QStringList getDevicePathsForInstance(int instanceIndex) const;
+    Q_INVOKABLE virtual QStringList getDevicePathsForInstance(int instanceIndex) const;
 
     /**
      * @brief Get hidraw paths for devices assigned to an instance
      * @param instanceIndex The instance index
      * @return List of hidraw paths (only devices that have hidraw)
      */
-    Q_INVOKABLE QStringList getHidrawPathsForInstance(int instanceIndex) const;
+    Q_INVOKABLE virtual QStringList getHidrawPathsForInstance(int instanceIndex) const;
 
     /**
      * @brief Find hidraw device path for an input event device via sysfs

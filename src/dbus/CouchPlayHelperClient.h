@@ -24,7 +24,7 @@ public:
 
     virtual bool isAvailable() const { return m_available; }
 
-    Q_INVOKABLE bool setDeviceOwner(const QString &devicePath, int uid);
+    Q_INVOKABLE virtual bool setDeviceOwner(const QString &devicePath, int uid);
 
     /**
      * @brief Restore device ownership to root:input

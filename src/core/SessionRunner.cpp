@@ -220,7 +220,11 @@ bool SessionRunner::start()
     m_layouts = calculateLayout(profile.layout, instanceCount, screenGeometry, profile.gridSubLayout);
 
     if (!setupDeviceOwnership()) {
-        qWarning() << "Failed to set up device ownership - continuing anyway";
+        qWarning() << "Failed to set up device ownership - aborting session start";
+        restoreDeviceOwnership();
+        uninhibitScreenSaver();
+        setStatus(QStringLiteral("Error"));
+        return false;
     }
 
     if (!setupSharedDirectories()) {
@@ -523,6 +527,7 @@ bool SessionRunner::setupDeviceOwnership()
             } else {
                 qWarning() << "SessionRunner: Failed to set ownership of" << path;
                 Q_EMIT errorOccurred(QStringLiteral("Failed to set device ownership for %1").arg(path));
+                return false;
             }
         }
         
@@ -535,6 +540,8 @@ bool SessionRunner::setupDeviceOwnership()
                 qDebug() << "SessionRunner: Set hidraw ownership" << hidrawPath << "for user" << username;
             } else {
                 qWarning() << "SessionRunner: Failed to set hidraw ownership" << hidrawPath;
+                Q_EMIT errorOccurred(QStringLiteral("Failed to set device ownership for %1").arg(hidrawPath));
+                return false;
             }
         }
     }
